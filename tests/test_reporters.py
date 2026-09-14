@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
+from rich.console import Console
+
 from argocd_source_lint.models import Finding, Severity
 from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
+from argocd_source_lint.reporters.table import render_findings as render_table
 
 _FINDING_NO_LINE = Finding(
     rule_id="orphan-source",
@@ -99,6 +103,24 @@ def test_gitlab_codequality_structure_and_severity_mapping():
     warning_issue = next(i for i in payload if i["check_name"] == "phantom-target")
     assert warning_issue["severity"] == "minor"
     assert warning_issue["location"]["lines"]["begin"] == 12
+
+
+def test_table_shows_placeholder_when_application_is_empty():
+    console = Console(file=io.StringIO(), no_color=True, width=200)
+    render_table(console, [_FINDING_NO_LINE, _FINDING_WITH_LINE])
+
+    output = console.file.getvalue()
+    assert "demo-app" in output
+    lines = [line for line in output.splitlines() if "orphan-source" in line]
+    assert len(lines) == 1
+    assert " - " in lines[0]  # placeholder in the empty Application column
+
+
+def test_table_prints_no_issues_message_when_findings_empty():
+    console = Console(file=io.StringIO(), no_color=True, width=200)
+    render_table(console, [])
+
+    assert "No issues detected." in console.file.getvalue()
 
 
 def test_gitlab_codequality_fingerprint_is_stable_and_unique():

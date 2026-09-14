@@ -33,7 +33,7 @@ def render_findings(console: Console, findings: list[Finding]) -> None:
         table.add_row(
             f"[{style}]{finding.severity.value}[/{style}]",
             finding.rule_id,
-            finding.application,
+            finding.application or "-",
             location,
             finding.message,
         )
