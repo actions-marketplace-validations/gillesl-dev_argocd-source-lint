@@ -88,7 +88,7 @@ known_operators:
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.0
+- uses: gillesl-dev/argocd-source-lint@v0.1.1
   with:
     path: .
 ```
@@ -97,7 +97,7 @@ known_operators:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.0
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.1
     inputs:
       scope: manifests/
 ```
@@ -107,7 +107,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.0
+    rev: v0.1.1
     hooks:
       - id: argocd-source-lint
 ```
