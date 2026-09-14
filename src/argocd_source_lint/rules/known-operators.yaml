@@ -1,0 +1,27 @@
+# Community signature pack for the missing-ignore-diff rule. Adding an
+# operator here is a plain YAML PR, never a code change — the rule engine
+# (rules/missing_ignore_diff.py) is entirely generic.
+#
+# - crd_trigger : "<group>/<Kind>" of the CRD that triggers the check.
+# - name_from   : dotted path to the name to extract from the found CRD
+#                 instance (e.g. metadata.name).
+# - expect_ignore_on : expected derived resources, with a `name_pattern`
+#                 templated by `{name}` (the name resolved via
+#                 `name_from`). An Application with `selfHeal: true` that
+#                 has an instance of `crd_trigger` but no
+#                 `ignoreDifferences` matching one of these resources is
+#                 flagged.
+
+- crd_trigger: postgresql.cnpg.io/Cluster
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}-app"
+    - kind: Secret
+      name_pattern: "{name}-ca"
+
+- crd_trigger: cert-manager.io/Certificate
+  name_from: spec.secretName
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}"

@@ -1,0 +1,7 @@
+- id: argocd-source-lint
+  name: argocd-source-lint
+  description: Detects silent failures in multi-source ArgoCD Applications.
+  entry: argocd-source-lint
+  language: python
+  pass_filenames: false
+  always_run: true

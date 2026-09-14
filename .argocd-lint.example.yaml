@@ -1,0 +1,19 @@
+# Copy to .argocd-lint.yaml at the repo root and adapt.
+# Any omitted key keeps its default value.
+
+scan_roots:
+  - manifests/
+  - infra/
+
+rules:
+  orphan-source: error
+  broken-values-ref: error
+  missing-ignore-diff: warning
+  phantom-target: error
+
+# Default: true (fail-closed). Only set to false knowingly if the team
+# accepts running on an incomplete shallow clone in CI.
+unverifiable_blocks_ci: true
+
+exclude_paths:
+  - manifests/legacy/**

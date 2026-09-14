@@ -1,0 +1,12 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: broken-ref-name
+spec:
+  sources:
+    - repoURL: https://charts.example.invalid/repo
+      chart: something
+      targetRevision: "1.0.0"
+      helm:
+        valueFiles:
+          - $missing/values.yaml

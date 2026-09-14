@@ -1,0 +1,64 @@
+[project]
+name = "argocd-source-lint"
+version = "0.1.0"
+description = "Static linter to detect silent failures in multi-source ArgoCD Applications"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "Oodrive" },
+]
+keywords = ["argocd", "gitops", "kubernetes", "lint", "static-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2",
+    "ruamel.yaml>=0.18",
+    "rich>=13",
+]
+
+[project.urls]
+Homepage = "https://github.com/gillesl-dev/argocd-source-lint"
+Repository = "https://github.com/gillesl-dev/argocd-source-lint"
+Issues = "https://github.com/gillesl-dev/argocd-source-lint/issues"
+
+[project.scripts]
+argocd-source-lint = "argocd_source_lint.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/argocd_source_lint"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# Gitignored internal working doc, never published — not project source.
+extend-exclude = ["argocd-source-lint-plan-technique.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# UP042: `str, Enum` (not `StrEnum`) is deliberate for pydantic v2 JSON
+# serialization of Severity/OutputFormat — a stylistic suggestion, not a bug.
+ignore = ["UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008: typer's CLI parameters are defined by calling typer.Argument()/
+# typer.Option() as the parameter default — that's the framework's API,
+# not a mutable-default bug.
+"src/argocd_source_lint/cli.py" = ["B008"]

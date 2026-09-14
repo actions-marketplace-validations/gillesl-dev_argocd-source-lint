@@ -1,0 +1,34 @@
+spec:
+  inputs:
+    scope:
+      description: 'Root of the repo to analyze'
+      default: '.'
+    stage:
+      description: 'CI stage in which to run the job'
+      default: 'test'
+    fail_on_error:
+      description: >-
+        Fail the job if blocking findings (error, or unverifiable
+        depending on the policy) are detected. Set to false for a
+        progressive rollout (report only, without breaking the pipeline).
+      type: boolean
+      default: true
+---
+
+argocd-source-lint:
+  stage: $[[ inputs.stage ]]
+  image: python:3.11-slim
+  before_script:
+    - pip install --disable-pip-version-check argocd-source-lint
+  script:
+    - |
+      argocd-source-lint "$[[ inputs.scope ]]" --format gitlab-codequality --output gl-code-quality-report.json
+      exit_code=$?
+      argocd-source-lint "$[[ inputs.scope ]]" --format table
+      if [ "$[[ inputs.fail_on_error ]]" = "true" ]; then
+        exit "$exit_code"
+      fi
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+    when: always

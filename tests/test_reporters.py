@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from argocd_source_lint.models import Finding, Severity
+from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
+
+_FINDING_NO_LINE = Finding(
+    rule_id="orphan-source",
+    severity=Severity.ERROR,
+    application="",
+    message="File not covered: manifests/orphaned/configmap.yaml",
+    file=Path("manifests/orphaned/configmap.yaml"),
+)
+
+_FINDING_WITH_LINE = Finding(
+    rule_id="phantom-target",
+    severity=Severity.WARNING,
+    application="demo-app",
+    message="path not found",
+    file=Path("bootstrap/argocd-apps/demo-app.yaml"),
+    line=12,
+)
+
+
+def test_json_report_uses_posix_paths_regardless_of_platform():
+    windows_style = Finding(
+        rule_id="orphan-source",
+        severity=Severity.ERROR,
+        application="",
+        message="x",
+        file=Path("manifests") / "orphaned" / "configmap.yaml",
+    )
+
+    payload = json.loads(json_report.render_findings([windows_style]))
+
+    assert payload["findings"][0]["file"] == "manifests/orphaned/configmap.yaml"
+    assert "\\" not in payload["findings"][0]["file"]
+
+
+def test_json_report_round_trips_all_fields():
+    payload = json.loads(json_report.render_findings([_FINDING_WITH_LINE]))
+
+    finding = payload["findings"][0]
+    assert finding["rule_id"] == "phantom-target"
+    assert finding["severity"] == "warning"
+    assert finding["application"] == "demo-app"
+    assert finding["line"] == 12
+
+
+def test_sarif_structure_and_severity_mapping():
+    payload = json.loads(sarif.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
+
+    assert payload["version"] == "2.1.0"
+    run = payload["runs"][0]
+    rule_ids = {rule["id"] for rule in run["tool"]["driver"]["rules"]}
+    assert rule_ids == {
+        "orphan-source",
+        "broken-values-ref",
+        "missing-ignore-diff",
+        "phantom-target",
+    }
+
+    results = run["results"]
+    assert len(results) == 2
+    error_result = next(r for r in results if r["ruleId"] == "orphan-source")
+    assert error_result["level"] == "error"
+    warning_result = next(r for r in results if r["ruleId"] == "phantom-target")
+    assert warning_result["level"] == "warning"
+
+
+def test_sarif_omits_region_when_line_is_none():
+    payload = json.loads(sarif.render_findings([_FINDING_NO_LINE]))
+
+    location = payload["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+    assert "region" not in location
+    assert location["artifactLocation"]["uri"] == "manifests/orphaned/configmap.yaml"
+
+
+def test_sarif_includes_region_when_line_is_set():
+    payload = json.loads(sarif.render_findings([_FINDING_WITH_LINE]))
+
+    location = payload["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+    assert location["region"]["startLine"] == 12
+
+
+def test_gitlab_codequality_structure_and_severity_mapping():
+    payload = json.loads(gitlab_codequality.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
+
+    assert isinstance(payload, list)
+    assert len(payload) == 2
+
+    error_issue = next(i for i in payload if i["check_name"] == "orphan-source")
+    assert error_issue["severity"] == "major"
+    assert error_issue["location"]["path"] == "manifests/orphaned/configmap.yaml"
+    assert error_issue["location"]["lines"]["begin"] == 1  # default when line=None
+
+    warning_issue = next(i for i in payload if i["check_name"] == "phantom-target")
+    assert warning_issue["severity"] == "minor"
+    assert warning_issue["location"]["lines"]["begin"] == 12
+
+
+def test_gitlab_codequality_fingerprint_is_stable_and_unique():
+    payload = json.loads(gitlab_codequality.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
+
+    fingerprints = {issue["fingerprint"] for issue in payload}
+    assert len(fingerprints) == 2  # two distinct findings -> two distinct fingerprints
+
+    # Same finding replayed -> same fingerprint (stable across CI runs).
+    replay = json.loads(gitlab_codequality.render_findings([_FINDING_NO_LINE]))
+    original = next(i for i in payload if i["check_name"] == "orphan-source")
+    assert replay[0]["fingerprint"] == original["fingerprint"]

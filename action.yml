@@ -1,0 +1,57 @@
+name: 'ArgoCD Source Lint'
+description: >-
+  Detects silent failures in multi-source ArgoCD Applications: orphan
+  sources, broken values refs, missing ignoreDifferences, phantom targets.
+author: 'Oodrive'
+
+inputs:
+  path:
+    description: 'Root of the repo to analyze'
+    required: false
+    default: '.'
+  fail-on-error:
+    description: >-
+      Fail the job if blocking findings (error, or unverifiable depending
+      on the policy) are detected. Set to "false" for a progressive
+      rollout (report only, without breaking the pipeline).
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version used to install argocd-source-lint'
+    required: false
+    default: '3.11'
+
+outputs:
+  sarif-file:
+    description: 'Path to the generated SARIF report'
+    value: ${{ steps.lint.outputs.sarif-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install argocd-source-lint
+      shell: bash
+      run: pip install --disable-pip-version-check argocd-source-lint
+
+    - name: Run argocd-source-lint
+      id: lint
+      shell: bash
+      run: |
+        set +e
+        argocd-source-lint "${{ inputs.path }}" --format sarif --output results.sarif
+        exit_code=$?
+        echo "sarif-file=results.sarif" >> "$GITHUB_OUTPUT"
+        if [ "${{ inputs.fail-on-error }}" = "true" ]; then
+          exit "$exit_code"
+        fi
+
+    - name: Upload SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: results.sarif

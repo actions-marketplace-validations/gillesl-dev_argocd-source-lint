@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from enum import Enum
+from pathlib import Path
+
+import typer
+from rich.console import Console
+
+from argocd_source_lint.git_context import get_origin_url
+from argocd_source_lint.loader import RawManifestDiscovery
+from argocd_source_lint.models import Application, Finding, Severity
+from argocd_source_lint.policy import Policy, load_policy
+from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
+from argocd_source_lint.reporters.table import render_findings as render_table
+from argocd_source_lint.rules.base import Rule
+from argocd_source_lint.rules.broken_values_ref import BrokenValuesRefRule
+from argocd_source_lint.rules.missing_ignore_diff import MissingIgnoreDiffRule
+from argocd_source_lint.rules.orphan_source import OrphanSourceRule
+from argocd_source_lint.rules.phantom_target import PhantomTargetRule
+
+app = typer.Typer(add_completion=False, no_args_is_help=True)
+console = Console()
+
+RULES: list[Rule] = [
+    OrphanSourceRule(),
+    PhantomTargetRule(),
+    BrokenValuesRefRule(),
+    MissingIgnoreDiffRule(),
+]
+
+
+class OutputFormat(str, Enum):
+    TABLE = "table"
+    JSON = "json"
+    SARIF = "sarif"
+    GITLAB_CODEQUALITY = "gitlab-codequality"
+
+
+@app.command()
+def lint(
+    path: Path = typer.Argument(Path("."), help="Root of the Git repo to analyze"),
+    format: OutputFormat = typer.Option(OutputFormat.TABLE, "--format", "-f", help="Report format"),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Write the report to this file instead of stdout"
+    ),
+) -> None:
+    """Analyze the repo's ArgoCD Applications and report detected issues."""
+    repo_root = path.resolve()
+    if not repo_root.is_dir():
+        console.print(f"[red]Path not found: {repo_root}[/red]")
+        raise typer.Exit(code=2)
+
+    policy = load_policy(repo_root)
+    applications = RawManifestDiscovery().discover(repo_root)
+    local_origin = get_origin_url(repo_root)
+
+    findings: list[Finding] = []
+    for rule in RULES:
+        findings.extend(rule.check(applications, repo_root, policy, local_origin))
+
+    _report(format, findings, applications, repo_root, output)
+
+    raise typer.Exit(code=_exit_code(findings, policy))
+
+
+def _report(
+    output_format: OutputFormat,
+    findings: list[Finding],
+    applications: list[Application],
+    repo_root: Path,
+    output: Path | None,
+) -> None:
+    if output_format == OutputFormat.TABLE:
+        _report_table(findings, applications, repo_root, output)
+        return
+
+    if output_format == OutputFormat.JSON:
+        text = json_report.render_findings(findings)
+    elif output_format == OutputFormat.SARIF:
+        text = sarif.render_findings(findings)
+    else:
+        text = gitlab_codequality.render_findings(findings)
+
+    if output is None:
+        print(text)
+    else:
+        output.write_text(text, encoding="utf-8")
+
+
+def _report_table(
+    findings: list[Finding],
+    applications: list[Application],
+    repo_root: Path,
+    output: Path | None,
+) -> None:
+    count = len(applications)
+    if output is None:
+        console.print(f"[bold]{count}[/bold] ArgoCD Application(s) discovered under {repo_root}\n")
+        render_table(console, findings)
+        return
+
+    with output.open("w", encoding="utf-8") as f:
+        file_console = Console(file=f, no_color=True, width=120)
+        file_console.print(f"{count} ArgoCD Application(s) discovered under {repo_root}\n")
+        render_table(file_console, findings)
+
+
+def _exit_code(findings: list[Finding], policy: Policy) -> int:
+    for finding in findings:
+        if finding.severity == Severity.ERROR:
+            return 1
+        if finding.severity == Severity.UNVERIFIABLE and policy.unverifiable_blocks_ci:
+            return 1
+    return 0
+
+
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()

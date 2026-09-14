@@ -1,0 +1,13 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pg-app
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/pg
+  syncPolicy:
+    automated:
+      selfHeal: true
