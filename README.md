@@ -104,7 +104,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.1
+- uses: gillesl-dev/argocd-source-lint@v0.1.2
   with:
     path: .
 ```
@@ -113,7 +113,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.1
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.2
     inputs:
       scope: manifests/
 ```
@@ -123,7 +123,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.1
+    rev: v0.1.2
     hooks:
       - id: argocd-source-lint
 ```
