@@ -65,6 +65,7 @@ def test_sarif_structure_and_severity_mapping():
         "missing-ignore-diff",
         "phantom-target",
         "unresolvable-generator",
+        "double-coverage",
     }
 
     results = run["results"]

@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
-from argocd_source_lint.models import Source
+from argocd_source_lint.git_context import local_path_sources
+from argocd_source_lint.models import Application, Source
 
 # A Helm chart packaged in the repo: out of scope for v1 content
 # interpretation (rendering a chart's templates is delegated to `helm
@@ -50,6 +51,23 @@ def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]
         ):
             continue
         yield candidate
+
+
+def covered_files_for_application(
+    app: Application, repo_root: Path, local_origin: str | None
+) -> set[Path]:
+    """Every file covered by any of `app`'s local `path` sources
+    (resolved, absolute) — shared by `missing-ignore-diff` and
+    `double-coverage`. `orphan-source` uses this as its base too, layering
+    the Helm `$values` file-covering nuance on top (see
+    `rules/orphan_source.py`)."""
+    covered: set[Path] = set()
+    for source in local_path_sources(app, local_origin):
+        source_dir = (repo_root / source.path).resolve()
+        if not source_dir.is_dir():
+            continue
+        covered.update(p.resolve() for p in covered_files_for_source(source_dir, source))
+    return covered
 
 
 def is_opaque_tool_directory(source_dir: Path) -> bool:

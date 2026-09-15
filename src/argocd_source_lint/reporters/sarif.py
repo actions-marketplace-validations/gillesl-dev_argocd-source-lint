@@ -16,6 +16,7 @@ _RULES_METADATA = {
         "An ApplicationSet generator requires live cluster/API access, or "
         "Go-template rendering — out of scope v1."
     ),
+    "double-coverage": "A file covered by more than one different Application at once.",
 }
 
 _LEVEL_BY_SEVERITY = {

@@ -5,9 +5,9 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from argocd_source_lint.coverage import covered_files_for_source
+from argocd_source_lint.coverage import covered_files_for_application
 from argocd_source_lint.fsutil import load_yaml_documents
-from argocd_source_lint.git_context import external_path_sources, local_path_sources
+from argocd_source_lint.git_context import external_path_sources
 from argocd_source_lint.models import Application, Finding, KnownOperatorSignature, Severity
 from argocd_source_lint.policy import Policy
 from argocd_source_lint.rules.base import Rule, external_source_finding
@@ -43,23 +43,11 @@ class MissingIgnoreDiffRule(Rule):
             for source in external_path_sources(app, local_origin):
                 findings.append(external_source_finding(RULE_ID, app, source))
 
-            for manifest_path in _covered_manifest_files(app, repo_root, local_origin):
+            for manifest_path in covered_files_for_application(app, repo_root, local_origin):
                 for doc in load_yaml_documents(manifest_path):
                     findings.extend(_check_document(app, doc, signatures, severity))
 
         return findings
-
-
-def _covered_manifest_files(
-    app: Application, repo_root: Path, local_origin: str | None
-) -> set[Path]:
-    files: set[Path] = set()
-    for source in local_path_sources(app, local_origin):
-        source_dir = (repo_root / source.path).resolve()
-        if not source_dir.is_dir():
-            continue
-        files.update(covered_files_for_source(source_dir, source))
-    return files
 
 
 def _check_document(

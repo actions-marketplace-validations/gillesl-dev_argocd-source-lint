@@ -22,6 +22,8 @@ no cluster access, no `kubeconfig`, no sensitive data involved.
 - `unresolvable-generator` — an `ApplicationSet` generator this tool can't
   resolve from a local checkout alone (live cluster/API access, or
   `goTemplate: true` rendering).
+- `double-coverage` — a file covered by more than one *different*
+  Application at once, each syncing it from an independent loop.
 
 ## What the tool does not do (v1)
 
@@ -80,6 +82,7 @@ rules:
   missing-ignore-diff: warning
   phantom-target: error
   unresolvable-generator: info
+  double-coverage: error
 
 unverifiable_blocks_ci: true
 
@@ -117,7 +120,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.6
+- uses: gillesl-dev/argocd-source-lint@v0.1.7
   with:
     path: .
 ```
@@ -126,7 +129,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.6
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.7
     inputs:
       scope: manifests/
 ```
@@ -136,7 +139,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.6
+    rev: v0.1.7
     hooks:
       - id: argocd-source-lint
 ```

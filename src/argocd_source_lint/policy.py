@@ -13,6 +13,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "missing-ignore-diff": Severity.WARNING,
     "phantom-target": Severity.ERROR,
     "unresolvable-generator": Severity.INFO,
+    "double-coverage": Severity.ERROR,
 }
 
 

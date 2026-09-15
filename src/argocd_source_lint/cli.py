@@ -21,6 +21,7 @@ from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
 from argocd_source_lint.reporters.table import render_findings as render_table
 from argocd_source_lint.rules.base import Rule
 from argocd_source_lint.rules.broken_values_ref import BrokenValuesRefRule
+from argocd_source_lint.rules.double_coverage import DoubleCoverageRule
 from argocd_source_lint.rules.missing_ignore_diff import MissingIgnoreDiffRule
 from argocd_source_lint.rules.orphan_source import OrphanSourceRule
 from argocd_source_lint.rules.phantom_target import PhantomTargetRule
@@ -34,6 +35,7 @@ RULES: list[Rule] = [
     PhantomTargetRule(),
     BrokenValuesRefRule(),
     MissingIgnoreDiffRule(),
+    DoubleCoverageRule(),
 ]
 
 

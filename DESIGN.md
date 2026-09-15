@@ -165,6 +165,24 @@ so no single YAML line is "the" location of a specific generated app —
 the best a reader can do is look at the ApplicationSet's own `template:`
 block, which `Finding.file` already points at.
 
+## `double-coverage`
+
+The mirror image of `orphan-source`: instead of "no Application covers
+this file", it's "more than one Application covers this file at once".
+Both rules (plus `missing-ignore-diff`) share the same per-Application
+coverage computation (`coverage.covered_files_for_application`) — they
+just group the result differently: `orphan-source` merges every
+Application's coverage into one set and flags what's outside it,
+`double-coverage` keeps the coverage per-Application and flags a file
+whose owner set has more than one entry.
+
+Deliberately scoped to *different* Applications: two sources of the
+*same* Application both reaching the same file is one sync loop, not two
+fighting each other, so it isn't flagged — the risk this rule targets
+(ArgoCD applying the same manifest from two independent reconciliation
+loops, flapping between whichever ran last) simply doesn't exist in that
+case.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

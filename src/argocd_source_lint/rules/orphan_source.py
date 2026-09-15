@@ -3,13 +3,9 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path
 
-from argocd_source_lint.coverage import covered_files_for_source
+from argocd_source_lint.coverage import covered_files_for_application
 from argocd_source_lint.fsutil import iter_yaml_files
-from argocd_source_lint.git_context import (
-    external_path_sources,
-    is_local_repo_url,
-    local_path_sources,
-)
+from argocd_source_lint.git_context import external_path_sources, is_local_repo_url
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy
 from argocd_source_lint.rules.base import Rule, external_source_finding
@@ -37,13 +33,7 @@ class OrphanSourceRule(Rule):
             for source in external_path_sources(app, local_origin):
                 findings.append(external_source_finding(RULE_ID, app, source))
 
-            for source in local_path_sources(app, local_origin):
-                source_dir = (repo_root / source.path).resolve()
-                if not source_dir.is_dir():
-                    # Nonexistent path: that's phantom-target's job to
-                    # report, not orphan-source's.
-                    continue
-                covered.update(p.resolve() for p in covered_files_for_source(source_dir, source))
+            covered.update(covered_files_for_application(app, repo_root, local_origin))
 
             # A Helm values file referenced via `$ref/path.yaml` in
             # `helm.valueFiles` (a very common pattern: external chart +
