@@ -78,6 +78,7 @@ def test_broken_ref_file_is_flagged_distinctly_from_broken_ref_name(fixture_repo
     assert finding.severity == Severity.ERROR
     assert "does-not-exist.yaml" in finding.message
     assert "ref: missing" not in finding.message
+    assert finding.line == 12  # the `- $values/...` valueFiles entry's line
 
 
 def test_bad_fixture_reports_exactly_two_distinct_findings(fixture_repo):

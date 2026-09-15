@@ -33,4 +33,5 @@ def external_source_finding(rule_id: str, app: Application, source: Source) -> F
             "only verifies sources in the repo it runs in, see DESIGN.md."
         ),
         file=app.source_file,
+        line=source.line,
     )

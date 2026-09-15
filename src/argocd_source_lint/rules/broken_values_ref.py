@@ -33,10 +33,16 @@ class BrokenValuesRefRule(Rule):
             ref_sources = {source.ref: source for source in app.sources if source.ref}
 
             for source in app.sources:
-                for entry in source.helm_value_files:
+                for idx, entry in enumerate(source.helm_value_files):
                     ref_name, rel_path = _parse_ref_entry(entry)
                     if ref_name is None:
                         continue  # not a `$ref/...` entry: out of scope for this rule
+
+                    entry_line = (
+                        source.helm_value_files_lines[idx]
+                        if idx < len(source.helm_value_files_lines)
+                        else None
+                    )
 
                     ref_source = ref_sources.get(ref_name)
                     if ref_source is None:
@@ -46,6 +52,7 @@ class BrokenValuesRefRule(Rule):
                                 severity,
                                 f"`{entry}` references `$ref: {ref_name}`, but no source "
                                 f"of the Application declares `ref: {ref_name}`.",
+                                line=entry_line,
                             )
                         )
                         continue
@@ -58,6 +65,7 @@ class BrokenValuesRefRule(Rule):
                                 f"`{entry}`: the `ref: {ref_name}` source points to an "
                                 "external repo — out of scope v1, this tool only "
                                 "verifies sources in the repo it runs in, see DESIGN.md.",
+                                line=entry_line,
                             )
                         )
                         continue
@@ -75,6 +83,7 @@ class BrokenValuesRefRule(Rule):
                                 f"{ref_name}`) missing from the local checkout — unable "
                                 "to verify the file. Add `fetch-depth: 0` or fetch the "
                                 "branch in question in CI.",
+                                line=entry_line,
                             )
                         )
                         continue
@@ -86,6 +95,7 @@ class BrokenValuesRefRule(Rule):
                                 severity,
                                 f"`{entry}`: file `{rel_path}` not found at revision "
                                 f"`{revision}` (source `ref: {ref_name}`).",
+                                line=entry_line,
                             )
                         )
 
@@ -109,11 +119,14 @@ def _parse_ref_entry(entry: str) -> tuple[str | None, str]:
     return ref_name, rel_path
 
 
-def _finding(app: Application, severity: Severity, message: str) -> Finding:
+def _finding(
+    app: Application, severity: Severity, message: str, line: int | None = None
+) -> Finding:
     return Finding(
         rule_id=RULE_ID,
         severity=severity,
         application=app.name,
         message=message,
         file=app.source_file,
+        line=line,
     )

@@ -35,6 +35,7 @@ def test_bad_fixture_flags_both_expected_secrets(fixture_repo):
     messages = {f.message for f in findings}
     assert any("pg-cluster-app" in m for m in messages)
     assert any("pg-cluster-ca" in m for m in messages)
+    assert all(f.line == 13 for f in findings)  # the `selfHeal: true` line
 
 
 def test_matching_ignore_diff_by_exact_name_suppresses_finding(git_repo):

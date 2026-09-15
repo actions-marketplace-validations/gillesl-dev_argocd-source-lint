@@ -40,6 +40,7 @@ def test_bad_phantom_target_flags_missing_path(fixture_repo):
     assert finding.severity == Severity.ERROR
     assert finding.application == "demo-app"
     assert "manifests/does-not-exist" in finding.message
+    assert finding.line == 8  # the source mapping's `repoURL:` line
 
 
 def test_multi_repo_application_is_flagged_info_and_not_checked(git_repo):

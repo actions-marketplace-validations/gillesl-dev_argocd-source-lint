@@ -7,7 +7,11 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-_yaml = YAML(typ="safe")
+# Round-trip (not "safe") mode: it's the only one that keeps line/column
+# info (`.lc`) on the parsed `CommentedMap`/`CommentedSeq`, needed by
+# `loader.py` to populate `Finding.line`. Still behaves as a plain
+# dict/list for every existing `.get()`/iteration call site.
+_yaml = YAML(typ="rt")
 
 
 def iter_yaml_files(directory: Path, *, recurse: bool = True) -> Iterator[Path]:

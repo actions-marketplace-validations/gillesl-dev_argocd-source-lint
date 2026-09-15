@@ -47,7 +47,9 @@ def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path
 
     sources = [_build_source(raw) for raw in raw_sources]
 
-    self_heal = bool(((spec.get("syncPolicy") or {}).get("automated") or {}).get("selfHeal", False))
+    automated = (spec.get("syncPolicy") or {}).get("automated") or {}
+    self_heal = bool(automated.get("selfHeal", False))
+    self_heal_line = _key_line(automated, "selfHeal") if self_heal else None
 
     ignore_differences = [
         _build_ignore_diff_rule(raw) for raw in spec.get("ignoreDifferences", []) or []
@@ -63,6 +65,7 @@ def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path
         namespace=metadata.get("namespace") or "argocd",
         sources=sources,
         sync_policy_self_heal=self_heal,
+        self_heal_line=self_heal_line,
         ignore_differences=ignore_differences,
         source_file=source_file,
     )
@@ -71,17 +74,57 @@ def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path
 def _build_source(raw: dict[str, Any]) -> Source:
     helm = raw.get("helm") or {}
     directory = raw.get("directory") or {}
+    value_files = helm.get("valueFiles", []) or []
     return Source(
         repo_url=raw.get("repoURL", ""),
         target_revision=raw.get("targetRevision") or "HEAD",
         path=raw.get("path"),
         chart=raw.get("chart"),
         ref=raw.get("ref"),
-        helm_value_files=helm.get("valueFiles", []) or [],
+        helm_value_files=list(value_files),
+        helm_value_files_lines=_item_lines(value_files),
         directory_recurse=bool(directory.get("recurse", False)),
         directory_include=directory.get("include"),
         directory_exclude=directory.get("exclude"),
+        line=_line_of(raw),
     )
+
+
+def _line_of(node: Any) -> int | None:
+    """1-indexed line where a round-trip-parsed mapping/sequence starts —
+    `None` for a plain dict/list (e.g. a `Source` built directly in a
+    test, without going through YAML at all)."""
+    lc = getattr(node, "lc", None)
+    line = getattr(lc, "line", None)
+    return line + 1 if isinstance(line, int) else None
+
+
+def _item_lines(seq: Any) -> list[int | None]:
+    """1-indexed line of each item in a round-trip-parsed sequence, same
+    order/index as `seq` itself."""
+    lc = getattr(seq, "lc", None)
+    if lc is None:
+        return [None] * len(seq)
+    lines: list[int | None] = []
+    for index in range(len(seq)):
+        try:
+            line, _col = lc.item(index)
+            lines.append(line + 1)
+        except (KeyError, IndexError):
+            lines.append(None)
+    return lines
+
+
+def _key_line(mapping: Any, key: str) -> int | None:
+    """1-indexed line of `key` within a round-trip-parsed mapping."""
+    lc = getattr(mapping, "lc", None)
+    if lc is None:
+        return None
+    try:
+        line, _col = lc.key(key)
+        return line + 1
+    except KeyError:
+        return None
 
 
 def _build_ignore_diff_rule(raw: dict[str, Any]) -> IgnoreDiffRule:

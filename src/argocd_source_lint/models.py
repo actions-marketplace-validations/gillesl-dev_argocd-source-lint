@@ -30,12 +30,19 @@ class Source(BaseModel):
     chart: str | None = None
     ref: str | None = None
     helm_value_files: list[str] = Field(default_factory=list)
+    # Line of each `helm_value_files` entry, same order/index — best-effort
+    # (None when the source YAML wasn't round-trip parsed, e.g. in tests
+    # that build a `Source` directly).
+    helm_value_files_lines: list[int | None] = Field(default_factory=list)
     # `spec.source(s)[].directory` (only relevant when `path` is a directory
     # of raw manifests, not a Helm chart or a Kustomize overlay).
     # Defaults aligned with ArgoCD: recurse=false, no filter.
     directory_recurse: bool = False
     directory_include: str | None = None
     directory_exclude: str | None = None
+    # 1-indexed line where this source's YAML mapping starts, for
+    # `Finding.line` — best-effort, None when unavailable.
+    line: int | None = None
 
 
 class ExpectedIgnoreDiff(BaseModel):
@@ -59,6 +66,9 @@ class Application(BaseModel):
     namespace: str
     sources: list[Source]
     sync_policy_self_heal: bool = False
+    # Line of the `selfHeal` key, when true — for `missing-ignore-diff`'s
+    # `Finding.line` (best-effort, None when unavailable).
+    self_heal_line: int | None = None
     ignore_differences: list[IgnoreDiffRule] = Field(default_factory=list)
     source_file: Path
 

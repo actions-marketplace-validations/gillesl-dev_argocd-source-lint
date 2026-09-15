@@ -51,6 +51,7 @@ class PhantomTargetRule(Rule):
                                 "the branch in question in CI."
                             ),
                             file=app.source_file,
+                            line=source.line,
                         )
                     )
                     continue
@@ -71,6 +72,7 @@ class PhantomTargetRule(Rule):
                                 f"`{revision}` — phantom target."
                             ),
                             file=app.source_file,
+                            line=source.line,
                         )
                     )
 

@@ -35,6 +35,7 @@ def test_bad_orphan_source_flags_uncovered_file_but_not_ignored_one(fixture_repo
     assert finding.rule_id == "orphan-source"
     assert "orphaned" in finding.file.as_posix()
     assert "ignored-orphan" not in finding.file.as_posix()
+    assert finding.line is None  # whole file is the issue, not one line of it
 
 
 def test_multi_repo_application_is_flagged_info_and_not_scanned(git_repo):
@@ -62,6 +63,7 @@ spec:
     assert finding.severity == Severity.INFO
     assert finding.application == "external-app"
     assert "out of scope" in finding.message
+    assert finding.line == 7  # the `source:` mapping's `repoURL:` line
 
 
 def test_mixed_local_and_external_sources_still_covers_the_local_source(git_repo):

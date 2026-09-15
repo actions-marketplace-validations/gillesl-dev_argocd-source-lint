@@ -206,6 +206,86 @@ metadata:
     assert applications == []
 
 
+def test_source_and_self_heal_line_numbers(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/legacy-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: legacy-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/legacy-app
+  syncPolicy:
+    automated:
+      selfHeal: true
+"""
+        }
+    )
+
+    app = RawManifestDiscovery().discover(repo_root)[0]
+
+    assert app.sources[0].line == 7
+    assert app.self_heal_line == 12
+
+
+def test_multi_source_and_value_files_line_numbers(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/multi-source-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: multi-source-app
+spec:
+  sources:
+    - repoURL: https://example.invalid/repo.git
+      targetRevision: HEAD
+      path: manifests/multi-source-app
+      helm:
+        valueFiles:
+          - values.yaml
+          - $values/manifests/multi-source-app/env-values.yaml
+    - repoURL: https://example.invalid/repo.git
+      targetRevision: HEAD
+      ref: values
+"""
+        }
+    )
+
+    app = RawManifestDiscovery().discover(repo_root)[0]
+    chart_source, ref_source = app.sources
+
+    assert chart_source.line == 7
+    assert chart_source.helm_value_files_lines == [12, 13]
+    assert ref_source.line == 14
+
+
+def test_self_heal_line_is_none_when_self_heal_absent(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/plain-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: plain-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/plain-app
+"""
+        }
+    )
+
+    app = RawManifestDiscovery().discover(repo_root)[0]
+
+    assert app.self_heal_line is None
+
+
 def test_discovers_multiple_documents_in_one_file(git_repo):
     repo_root = git_repo(
         {

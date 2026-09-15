@@ -95,6 +95,27 @@ implementations rather than shared — one feeds an opaque MD5 for GitLab's
 UI, the other needs the fields spelled out for human review, so
 unifying them would only add an indirection neither side needs.
 
+## `Finding.line`
+
+Populating it requires knowing where in the YAML a given field actually
+sits, which `ruamel.yaml`'s "safe" loader throws away — so `fsutil.py`
+parses in round-trip mode (`typ="rt"`) instead. The returned
+`CommentedMap`/`CommentedSeq` still behave as plain `dict`/`list` for
+every existing `.get()`/iteration call site; only `loader.py` reaches for
+their `.lc` (line/column) attribute to fill `Source.line`,
+`Source.helm_value_files_lines` and `Application.self_heal_line`.
+
+The granularity is deliberately "point at the right block", not "point
+at the exact character": a finding about a source points at that
+source's mapping (where `repoURL:` sits), a `broken-values-ref` finding
+points at the specific `valueFiles` entry, `missing-ignore-diff` points
+at the `selfHeal: true` key (the field that enables the risk, since
+there's no existing `ignoreDifferences` entry to point at — it's about
+an absence). `orphan-source`'s main finding is the one deliberate
+exception: it stays `None`, because the whole file is the problem, not
+one line of it — SARIF correctly renders that as "no region" rather than
+a misleading line 1.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

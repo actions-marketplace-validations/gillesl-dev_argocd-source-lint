@@ -96,6 +96,7 @@ def _check_document(
                         "this out-of-Git-managed field on every sync."
                     ),
                     file=app.source_file,
+                    line=app.self_heal_line,
                 )
             )
     return findings
