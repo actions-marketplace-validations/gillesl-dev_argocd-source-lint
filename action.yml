@@ -4,6 +4,10 @@ description: >-
   sources, broken values refs, missing ignoreDifferences, phantom targets.
 author: 'gillesl-dev'
 
+branding:
+  icon: 'search'
+  color: 'blue'
+
 inputs:
   path:
     description: 'Root of the repo to analyze'
