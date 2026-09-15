@@ -88,9 +88,10 @@ checkout. Each rule is listed in full in the [table above](#what-the-tool-does).
 - `ApplicationSet` support covers `list`, `git` (`directories`/`files`)
   and `matrix` generators — each generated `Application` goes through
   the same rules as a plain one. `clusters`/`scmProvider`/`pullRequest`/
-  `merge`/`plugin` generators and `goTemplate: true` rendering require
-  live cluster/API access or a different templating engine — out of
-  scope v1, flagged `unresolvable-generator` rather than guessed at.
+  `merge`/`plugin` generators, `goTemplate: true` rendering, and a
+  generator's own `selector` (label filter) require live cluster/API
+  access or logic this tool doesn't reimplement — out of scope v1,
+  flagged `unresolvable-generator` rather than guessed at.
 - Multi-repo `Application` resources (sources pointing to a repo other
   than the one analyzed) are detected and flagged `info`, never checked
   nor silently ignored.
@@ -177,7 +178,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.7
+- uses: gillesl-dev/argocd-source-lint@v0.1.8
   with:
     path: .
 ```
@@ -186,7 +187,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.7
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.8
     inputs:
       scope: manifests/
 ```
@@ -196,7 +197,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.7
+    rev: v0.1.8
     hooks:
       - id: argocd-source-lint
 ```

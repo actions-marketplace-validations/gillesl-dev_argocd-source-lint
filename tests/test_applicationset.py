@@ -294,6 +294,85 @@ spec:
     assert "different repo" in findings[0].message
 
 
+def test_list_generator_with_selector_is_flagged_unresolvable(git_repo):
+    """A `selector` (label filter) changes which params ArgoCD keeps —
+    evaluating it would require guessing at label matches, so it's
+    flagged rather than expanded as if the selector weren't there."""
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/list-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: list-appset
+spec:
+  generators:
+    - list:
+        elements:
+          - env: dev
+      selector:
+        matchLabels:
+          env: dev
+  template:
+    metadata:
+      name: 'myapp-{{env}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: manifests/app
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert findings[0].severity == Severity.INFO
+    assert "selector" in findings[0].message
+
+
+def test_matrix_child_generator_with_selector_is_flagged_unresolvable(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/matrix-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: matrix-appset
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - region: eu
+            selector:
+              matchLabels:
+                region: eu
+          - list:
+              elements:
+                - env: dev
+  template:
+    metadata:
+      name: 'app-{{region}}-{{env}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: manifests/app
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert "selector" in findings[0].message
+
+
 def test_generated_application_is_checked_by_existing_rules(git_repo):
     """The whole point: a generated Application is a plain `Application`
     from the rules' point of view — no special-casing needed in

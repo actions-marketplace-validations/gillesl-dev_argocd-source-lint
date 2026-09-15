@@ -119,6 +119,18 @@ def _resolve_generator(
     source_file: Path,
     severity: Severity,
 ) -> tuple[list[dict[str, str]], list[Finding]]:
+    if generator.get("selector"):
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                severity,
+                "generator has a `selector` (label filter on the generated params) — "
+                "this tool doesn't evaluate label selectors, out of scope v1; every "
+                "combination is left unexpanded rather than guessed at.",
+            )
+        ]
+
     if "list" in generator:
         return _resolve_list(generator.get("list") or {}), []
     if "git" in generator:

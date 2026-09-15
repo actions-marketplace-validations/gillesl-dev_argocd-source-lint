@@ -159,6 +159,17 @@ implemented here). A `git` generator whose `repoURL` doesn't match the
 repo being analyzed is equally out of scope, same principle as an
 external `Application` source.
 
+A generator's own `selector` (a label filter on its generated params,
+sibling of `list`/`git`/`matrix` in the same generator entry — including
+each child generator nested inside a `matrix`) is equally flagged
+`unresolvable-generator` rather than expanded as if it weren't there:
+evaluating a label match against the generated params without guessing
+would need the exact same semantics ArgoCD itself applies, which this
+tool doesn't reimplement. Silently ignoring it would risk generating
+Applications ArgoCD would actually filter out — the same
+never-silently-skip principle as every other out-of-scope generator
+here.
+
 `Finding.line` is always `None` for a generated Application: the
 template is consumed once per generator output with different params,
 so no single YAML line is "the" location of a specific generated app —
