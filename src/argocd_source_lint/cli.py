@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from argocd_source_lint import tool_version
 from argocd_source_lint.baseline import (
     DEFAULT_BASELINE_FILENAME,
     load_baseline,
@@ -43,9 +44,22 @@ class OutputFormat(str, Enum):
     GITLAB_CODEQUALITY = "gitlab-codequality"
 
 
+def _print_version_and_exit(show: bool) -> None:
+    if show:
+        console.print(tool_version())
+        raise typer.Exit()
+
+
 @app.command()
 def lint(
     path: Path = typer.Argument(Path("."), help="Root of the Git repo to analyze"),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_print_version_and_exit,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
     format: OutputFormat = typer.Option(OutputFormat.TABLE, "--format", "-f", help="Report format"),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write the report to this file instead of stdout"

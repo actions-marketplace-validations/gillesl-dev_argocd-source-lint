@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from importlib.metadata import PackageNotFoundError, version
 
+from argocd_source_lint import tool_version
 from argocd_source_lint.models import Finding, Severity
 
 _INFORMATION_URI = "https://github.com/gillesl-dev/argocd-source-lint"
@@ -32,7 +32,7 @@ def render_findings(findings: list[Finding]) -> str:
                     "driver": {
                         "name": "argocd-source-lint",
                         "informationUri": _INFORMATION_URI,
-                        "version": _tool_version(),
+                        "version": tool_version(),
                         "rules": [
                             {
                                 "id": rule_id,
@@ -60,10 +60,3 @@ def _result(finding: Finding) -> dict:
         "message": {"text": finding.message},
         "locations": [{"physicalLocation": physical_location}],
     }
-
-
-def _tool_version() -> str:
-    try:
-        return version("argocd-source-lint")
-    except PackageNotFoundError:
-        return "0.0.0-dev"

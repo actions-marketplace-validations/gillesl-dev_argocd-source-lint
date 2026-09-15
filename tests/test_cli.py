@@ -9,6 +9,13 @@ from argocd_source_lint.cli import app
 runner = CliRunner()
 
 
+def test_version_flag_prints_version_and_exits_0():
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip()
+
+
 def test_exit_code_1_on_phantom_target_error(fixture_repo):
     repo_root = fixture_repo("bad_phantom_target")
 
