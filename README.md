@@ -1,29 +1,80 @@
 # argocd-source-lint
 
 [![Tests](https://github.com/gillesl-dev/argocd-source-lint/actions/workflows/test.yml/badge.svg)](https://github.com/gillesl-dev/argocd-source-lint/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/github/license/gillesl-dev/argocd-source-lint)](./LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#)
 
 Static linter to detect silent failures in multi-source ArgoCD
 `Application` resources: resources never synced, broken `$values`,
 missing `ignoreDifferences`, phantom targets.
 
-Analyzes the Git repo it runs in (the checkout already present in CI) —
-no cluster access, no `kubeconfig`, no sensitive data involved.
+These are the failures ArgoCD itself stays quiet about: the Application
+shows healthy and synced while a manifest sits in the repo unreferenced,
+a `$ref` points nowhere, or two Applications fight over the same file.
+`argocd-source-lint` analyzes the Git repo it runs in (the checkout
+already present in CI) — no cluster access, no `kubeconfig`, no
+sensitive data involved.
+
+## Contents
+
+- [What the tool does](#what-the-tool-does)
+- [How it fits together](#how-it-fits-together)
+- [What the tool does not do (v1)](#what-the-tool-does-not-do-v1)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Adopting on an existing repo](#adopting-on-an-existing-repo)
+- [CI/CD integration](#cicd-integration)
+- [Development](#development)
+- [License](#license)
 
 ## What the tool does
 
-- `orphan-source` — a manifest present in the repo but not covered by any
-  declared source.
-- `broken-values-ref` — a `$ref` in a Helm `valueFiles` entry with no
-  matching source or file.
-- `missing-ignore-diff` — a known at-risk CRD (CNPG, cert-manager...) with
-  no `ignoreDifferences` while `selfHeal: true` is active.
-- `phantom-target` — a `targetRevision`/`path` that resolves to nothing in
-  the repo.
-- `unresolvable-generator` — an `ApplicationSet` generator this tool can't
-  resolve from a local checkout alone (live cluster/API access, or
-  `goTemplate: true` rendering).
-- `double-coverage` — a file covered by more than one *different*
-  Application at once, each syncing it from an independent loop.
+| Rule | Default severity | Detects |
+| --- | --- | --- |
+| `orphan-source` | error | a manifest present in the repo but not covered by any declared source |
+| `broken-values-ref` | error | a `$ref` in a Helm `valueFiles` entry with no matching source or file |
+| `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager...) with no `ignoreDifferences` while `selfHeal: true` is active |
+| `phantom-target` | error | a `targetRevision`/`path` that resolves to nothing in the repo |
+| `unresolvable-generator` | info | an `ApplicationSet` generator this tool can't resolve from a local checkout alone (live cluster/API access, or `goTemplate: true` rendering) |
+| `double-coverage` | error | a file covered by more than one *different* Application at once, each syncing it from an independent loop |
+
+Sample run, table output (the default):
+
+```text
+$ argocd-source-lint .
+
+  Rule                Severity  File                                Application     Message
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  phantom-target       error    apps/payments/application.yaml     payments-service  targetRevision "release-3.2"
+                                                                                       does not resolve to any
+                                                                                       local ref
+  orphan-source        error    manifests/legacy/old-ingress.yaml   -                 not covered by any
+                                                                                       declared source
+  double-coverage      error    manifests/shared/configmap.yaml    -                 covered by both "team-a"
+                                                                                       and "team-b"
+  missing-ignore-diff  warning  apps/postgres/application.yaml     postgres-cluster  selfHeal: true with no
+                                                                                       ignoreDifferences on a
+                                                                                       CNPG Cluster
+
+4 findings (2 error, 1 warning, 0 info) — exit code 1
+```
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage"]
+    C --> D{"Policy<br/>severity overrides + baseline"}
+    D --> E["Reporters<br/>table, json, sarif, gitlab-codequality"]
+```
+
+Everything left of the policy step is pure filesystem/git reading — no
+network call, no credential, so it runs in any CI job that already has a
+checkout. Each rule is listed in full in the [table above](#what-the-tool-does).
 
 ## What the tool does not do (v1)
 
@@ -49,6 +100,12 @@ no cluster access, no `kubeconfig`, no sensitive data involved.
 ```bash
 pip install argocd-source-lint
 ```
+
+> Currently published to TestPyPI only, pending v1.0.0 (see
+> [Development](#development) for the TestPyPI install command). The
+> [GitHub Action](#github-actions) and [pre-commit hook](#pre-commit)
+> below will start working end-to-end once the package lands on the
+> real PyPI index.
 
 ## Usage
 
@@ -150,6 +207,15 @@ repos:
 uv sync --extra dev
 uv run argocd-source-lint .
 uv run pytest
+```
+
+To try a TestPyPI-published version locally instead of the extra
+dependencies above:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ \
+  --extra-index-url https://pypi.org/simple/ \
+  argocd-source-lint
 ```
 
 See [DESIGN.md](./DESIGN.md) for the reasoning behind the mono-repo v1
