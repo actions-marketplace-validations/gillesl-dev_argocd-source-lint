@@ -83,6 +83,22 @@ known_operators:
         name_pattern: "{name}-credentials"
 ```
 
+## Adopting on an existing repo
+
+A first run on a large, existing repo will likely surface pre-existing
+issues (a decommissioned component never archived, a manifest applied
+out-of-band). Accept them once so only *new* findings block CI from now
+on:
+
+```bash
+argocd-source-lint . --write-baseline
+```
+
+This writes `.argocd-lint-baseline.yaml` — commit it. It's plain YAML
+(rule, file, application, message), meant to be reviewed like any other
+file, not a hash lockfile. Re-run `--write-baseline` any time you want to
+accept the current state again (it overwrites the file outright).
+
 ## CI/CD integration
 
 ### GitHub Actions

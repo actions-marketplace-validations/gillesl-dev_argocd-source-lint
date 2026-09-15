@@ -6,6 +6,12 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from argocd_source_lint.baseline import (
+    DEFAULT_BASELINE_FILENAME,
+    load_baseline,
+    split_by_baseline,
+    write_baseline,
+)
 from argocd_source_lint.git_context import get_origin_url
 from argocd_source_lint.loader import RawManifestDiscovery
 from argocd_source_lint.models import Application, Finding, Severity
@@ -20,6 +26,7 @@ from argocd_source_lint.rules.phantom_target import PhantomTargetRule
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
+err_console = Console(stderr=True)
 
 RULES: list[Rule] = [
     OrphanSourceRule(),
@@ -43,6 +50,14 @@ def lint(
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Write the report to this file instead of stdout"
     ),
+    update_baseline: bool = typer.Option(
+        False,
+        "--write-baseline",
+        help=(
+            "Accept every current finding into the baseline file instead of "
+            "reporting them, so only new findings block CI from now on."
+        ),
+    ),
 ) -> None:
     """Analyze the repo's ArgoCD Applications and report detected issues."""
     repo_root = path.resolve()
@@ -58,9 +73,22 @@ def lint(
     for rule in RULES:
         findings.extend(rule.check(applications, repo_root, policy, local_origin))
 
-    _report(format, findings, applications, repo_root, output)
+    if update_baseline:
+        baseline_file = write_baseline(repo_root, findings)
+        console.print(f"[green]{len(findings)}[/green] finding(s) accepted into {baseline_file}")
+        raise typer.Exit(code=0)
 
-    raise typer.Exit(code=_exit_code(findings, policy))
+    baseline = load_baseline(repo_root)
+    new_findings, known_findings = split_by_baseline(findings, baseline)
+    if known_findings:
+        err_console.print(
+            f"[dim]{len(known_findings)} finding(s) suppressed by "
+            f"{repo_root / DEFAULT_BASELINE_FILENAME}[/dim]"
+        )
+
+    _report(format, new_findings, applications, repo_root, output)
+
+    raise typer.Exit(code=_exit_code(new_findings, policy))
 
 
 def _report(

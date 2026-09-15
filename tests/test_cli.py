@@ -25,6 +25,41 @@ def test_exit_code_0_on_good_repo(fixture_repo):
     assert result.exit_code == 0
 
 
+def test_write_baseline_accepts_current_findings_and_exits_0(fixture_repo):
+    repo_root = fixture_repo("bad_phantom_target")
+
+    result = runner.invoke(app, [str(repo_root), "--write-baseline"])
+
+    assert result.exit_code == 0
+    assert (repo_root / ".argocd-lint-baseline.yaml").is_file()
+
+
+def test_baselined_finding_no_longer_blocks_ci(fixture_repo):
+    repo_root = fixture_repo("bad_phantom_target")
+    runner.invoke(app, [str(repo_root), "--write-baseline"])
+
+    result = runner.invoke(app, [str(repo_root)])
+
+    assert result.exit_code == 0
+    assert "phantom-target" not in result.stdout
+
+
+def test_new_finding_still_blocks_ci_after_baselining_a_different_one(fixture_repo):
+    repo_root = fixture_repo("bad_phantom_target")
+    runner.invoke(app, [str(repo_root), "--write-baseline"])
+    # A new, never-baselined finding appears (a fresh orphan file).
+    orphan = repo_root / "manifests" / "new-orphan.yaml"
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_text("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: new-orphan\n")
+    (repo_root / ".argocd-lint.yaml").write_text("scan_roots:\n  - manifests/\n")
+
+    result = runner.invoke(app, [str(repo_root)])
+
+    assert result.exit_code == 1
+    assert "phantom-target" not in result.stdout
+    assert "orphan-source" in result.stdout
+
+
 def test_unverifiable_blocks_ci_by_default(git_repo):
     repo_root = git_repo(
         {

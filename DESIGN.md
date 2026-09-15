@@ -67,6 +67,34 @@ precisely because the silent-failure mode is worse than a noisy one: a
 misconfigured shallow clone should be loud, not a quiet blind spot that
 looks identical to "everything's fine."
 
+## The baseline file
+
+Adopting the tool on an existing, large mono-repo almost always surfaces
+pre-existing issues (decommissioned components never archived, manifests
+applied out-of-band and never brought under GitOps) that are legitimate
+findings but not something a team can fix before the next commit. Without
+a way to accept them, day one of adoption is "CI is red and stays red
+until someone clears a backlog" — which either blocks adoption outright or
+gets the tool disabled at the first friction.
+
+`.argocd-lint-baseline.yaml` (`baseline.py`) is a flat, plain-YAML list of
+accepted findings (`rule_id`, `file`, `application`, `message` — no
+opaque hash, so a reviewer can read a PR diff to it and understand exactly
+what's being accepted and why). `--write-baseline` snapshots every current
+finding into it in one shot; from then on, only *new* findings (not an
+exact match in the baseline) are reported and affect the exit code — a
+suppressed count is still printed to stderr so the baseline never silently
+hides that it's doing something.
+
+The match is exact on all four fields, deliberately no fuzzy/partial
+matching: a change to the finding's message (e.g. the path shifting after
+a rename) makes it "new" again rather than silently staying suppressed
+forever under a stale description. This mirrors the fingerprint already
+used by `reporters/gitlab_codequality.py`, kept as two independent
+implementations rather than shared — one feeds an opaque MD5 for GitLab's
+UI, the other needs the fields spelled out for human review, so
+unifying them would only add an indirection neither side needs.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —
