@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from argocd_source_lint import tool_version
+from argocd_source_lint import applicationset, tool_version
 from argocd_source_lint.baseline import (
     DEFAULT_BASELINE_FILENAME,
     load_baseline,
@@ -83,7 +83,11 @@ def lint(
     applications = RawManifestDiscovery().discover(repo_root)
     local_origin = get_origin_url(repo_root)
 
-    findings: list[Finding] = []
+    generated_apps, findings = applicationset.discover(
+        repo_root, local_origin, policy.rules.get(applicationset.RULE_ID, Severity.INFO)
+    )
+    applications += generated_apps
+
     for rule in RULES:
         findings.extend(rule.check(applications, repo_root, policy, local_origin))
 

@@ -64,6 +64,7 @@ def test_sarif_structure_and_severity_mapping():
         "broken-values-ref",
         "missing-ignore-diff",
         "phantom-target",
+        "unresolvable-generator",
     }
 
     results = run["results"]

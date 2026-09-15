@@ -10,6 +10,7 @@ rules:
   broken-values-ref: error
   missing-ignore-diff: warning
   phantom-target: error
+  unresolvable-generator: info
 
 # Default: true (fail-closed). Only set to false knowingly if the team
 # accepts running on an incomplete shallow clone in CI.

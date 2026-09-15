@@ -127,6 +127,44 @@ exception: it stays `None`, because the whole file is the problem, not
 one line of it — SARIF correctly renders that as "no region" rather than
 a misleading line 1.
 
+## ApplicationSet generators
+
+`applicationset.py` expands each `ApplicationSet` into the `Application`s
+its generators would produce, then feeds them into `loader.build_application`
+— from that point on a generated `Application` is indistinguishable from
+a plain one, so every existing rule applies to it with zero special-casing.
+That reuse is the whole point: it's what lets `phantom-target` (or any
+other rule) catch a real bug in a generated Application for free.
+
+Supported, because they're resolvable from a local Git checkout alone
+(no live cluster/API call, consistent with the tool's core constraint):
+
+- `list` — elements are already inline in the YAML.
+- `git.directories`/`git.files` — read the **local working tree**
+  directly, not `git show <revision>`. Correct whenever `revision`
+  matches what's checked out (`HEAD`, the overwhelming majority of
+  real-world usage); a deliberate v1 simplification, not a silent
+  approximation, kept for simplicity over the marginal case of a generator
+  pinned to some other revision.
+- `matrix` — the cartesian product of its child generators' params
+  (later keys override earlier ones on collision), as long as every
+  child is itself resolvable.
+
+Not supported, each producing one `unresolvable-generator` finding
+(`info` by default) instead of guessing: `clusters`, `scmProvider`,
+`pullRequest`, `merge`, `plugin` (all require a live API/cluster call —
+the tool has none), and `goTemplate: true` (a different templating
+engine, Go templates, not the classic `{{key}}` substitution
+implemented here). A `git` generator whose `repoURL` doesn't match the
+repo being analyzed is equally out of scope, same principle as an
+external `Application` source.
+
+`Finding.line` is always `None` for a generated Application: the
+template is consumed once per generator output with different params,
+so no single YAML line is "the" location of a specific generated app —
+the best a reader can do is look at the ApplicationSet's own `template:`
+block, which `Finding.file` already points at.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

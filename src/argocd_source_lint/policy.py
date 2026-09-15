@@ -12,6 +12,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "broken-values-ref": Severity.ERROR,
     "missing-ignore-diff": Severity.WARNING,
     "phantom-target": Severity.ERROR,
+    "unresolvable-generator": Severity.INFO,
 }
 
 

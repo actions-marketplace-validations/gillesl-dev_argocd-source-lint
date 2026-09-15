@@ -23,7 +23,7 @@ class RawManifestDiscovery(ApplicationDiscovery):
         for manifest_path in sorted(iter_yaml_files(repo_root)):
             for doc in load_yaml_documents(manifest_path):
                 if _is_argocd_application(doc):
-                    applications.append(_build_application(doc, manifest_path, repo_root))
+                    applications.append(build_application(doc, manifest_path, repo_root))
         return applications
 
 
@@ -33,7 +33,7 @@ def _is_argocd_application(doc: dict[str, Any]) -> bool:
     )
 
 
-def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path) -> Application:
+def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path) -> Application:
     metadata = doc.get("metadata", {}) or {}
     spec = doc.get("spec", {}) or {}
 
@@ -45,7 +45,7 @@ def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path
     else:
         raw_sources = []
 
-    sources = [_build_source(raw) for raw in raw_sources]
+    sources = [build_source(raw) for raw in raw_sources]
 
     automated = (spec.get("syncPolicy") or {}).get("automated") or {}
     self_heal = bool(automated.get("selfHeal", False))
@@ -71,7 +71,7 @@ def _build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path
     )
 
 
-def _build_source(raw: dict[str, Any]) -> Source:
+def build_source(raw: dict[str, Any]) -> Source:
     helm = raw.get("helm") or {}
     directory = raw.get("directory") or {}
     value_files = helm.get("valueFiles", []) or []

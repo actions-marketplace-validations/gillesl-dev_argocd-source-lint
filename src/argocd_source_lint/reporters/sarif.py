@@ -12,6 +12,10 @@ _RULES_METADATA = {
     "broken-values-ref": "$ref in a Helm valueFiles entry with no matching source or file.",
     "missing-ignore-diff": "Known at-risk kind with no ignoreDifferences while selfHeal is active.",
     "phantom-target": "targetRevision/path resolves to nothing in the repo.",
+    "unresolvable-generator": (
+        "An ApplicationSet generator requires live cluster/API access, or "
+        "Go-template rendering — out of scope v1."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

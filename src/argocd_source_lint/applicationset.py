@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+
+from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
+from argocd_source_lint.git_context import is_local_repo_url
+from argocd_source_lint.loader import build_application
+from argocd_source_lint.models import Application, Finding, Severity
+
+RULE_ID = "unresolvable-generator"
+
+# Classic ApplicationSet templating (`{{key}}`, valyala/fasttemplate) —
+# `spec.goTemplate: true` switches to Go template syntax instead, which is
+# a different rendering engine entirely and out of scope v1 (see below).
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
+
+_yaml_safe = YAML(typ="safe")
+
+
+def discover(
+    repo_root: Path, local_origin: str | None, severity: Severity
+) -> tuple[list[Application], list[Finding]]:
+    """Expands every `ApplicationSet` in the repo into the `Application`s
+    its generators would produce, so the existing rules apply to them
+    unchanged. A generator this tool can't resolve locally (requires a
+    live cluster/API, or Go-template rendering) produces one `info`
+    finding instead of guessing — same principle as an external
+    `Application` source (see DESIGN.md)."""
+    applications: list[Application] = []
+    findings: list[Finding] = []
+
+    for manifest_path in sorted(iter_yaml_files(repo_root)):
+        for doc in load_yaml_documents(manifest_path):
+            if not _is_application_set(doc):
+                continue
+            expanded_apps, doc_findings = _expand(
+                doc, manifest_path, repo_root, local_origin, severity
+            )
+            applications.extend(expanded_apps)
+            findings.extend(doc_findings)
+
+    return applications, findings
+
+
+def _is_application_set(doc: dict[str, Any]) -> bool:
+    return doc.get("kind") == "ApplicationSet" and str(doc.get("apiVersion", "")).startswith(
+        "argoproj.io/"
+    )
+
+
+def _expand(
+    doc: dict[str, Any],
+    manifest_path: Path,
+    repo_root: Path,
+    local_origin: str | None,
+    severity: Severity,
+) -> tuple[list[Application], list[Finding]]:
+    metadata = doc.get("metadata", {}) or {}
+    spec = doc.get("spec", {}) or {}
+    appset_name = metadata.get("name", "")
+    try:
+        source_file = manifest_path.relative_to(repo_root)
+    except ValueError:
+        source_file = manifest_path
+
+    if spec.get("goTemplate"):
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                severity,
+                "`goTemplate: true` (Go template rendering) is out of scope v1 — "
+                "only the classic `{{key}}` substitution is supported.",
+            )
+        ]
+
+    template = spec.get("template") or {}
+    applications: list[Application] = []
+    findings: list[Finding] = []
+
+    for generator in spec.get("generators") or []:
+        if not isinstance(generator, dict):
+            continue
+        param_sets, generator_findings = _resolve_generator(
+            generator, repo_root, local_origin, appset_name, source_file, severity
+        )
+        findings.extend(generator_findings)
+        for params in param_sets:
+            applications.append(
+                _build_generated_application(template, params, manifest_path, repo_root)
+            )
+
+    return applications, findings
+
+
+def _build_generated_application(
+    template: dict[str, Any], params: dict[str, str], manifest_path: Path, repo_root: Path
+) -> Application:
+    rendered = _substitute(template, params)
+    doc = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Application",
+        "metadata": rendered.get("metadata") or {},
+        "spec": rendered.get("spec") or {},
+    }
+    return build_application(doc, manifest_path, repo_root)
+
+
+def _resolve_generator(
+    generator: dict[str, Any],
+    repo_root: Path,
+    local_origin: str | None,
+    appset_name: str,
+    source_file: Path,
+    severity: Severity,
+) -> tuple[list[dict[str, str]], list[Finding]]:
+    if "list" in generator:
+        return _resolve_list(generator.get("list") or {}), []
+    if "git" in generator:
+        return _resolve_git(
+            generator.get("git") or {}, repo_root, local_origin, appset_name, source_file, severity
+        )
+    if "matrix" in generator:
+        return _resolve_matrix(
+            generator.get("matrix") or {},
+            repo_root,
+            local_origin,
+            appset_name,
+            source_file,
+            severity,
+        )
+
+    kind = next(iter(generator), "unknown")
+    return [], [
+        _finding(
+            appset_name,
+            source_file,
+            severity,
+            f"`{kind}` generator requires live cluster/API access — out of scope v1, "
+            "this tool only reads the local Git checkout.",
+        )
+    ]
+
+
+def _resolve_list(list_generator: dict[str, Any]) -> list[dict[str, str]]:
+    elements = list_generator.get("elements") or []
+    return [_flatten_params(element) for element in elements if isinstance(element, dict)]
+
+
+def _resolve_git(
+    git_generator: dict[str, Any],
+    repo_root: Path,
+    local_origin: str | None,
+    appset_name: str,
+    source_file: Path,
+    severity: Severity,
+) -> tuple[list[dict[str, str]], list[Finding]]:
+    repo_url = git_generator.get("repoURL", "")
+    if not is_local_repo_url(repo_url, local_origin):
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                severity,
+                "git generator targets a different repo — out of scope v1, this tool "
+                "only verifies sources in the repo it runs in, see DESIGN.md.",
+            )
+        ]
+
+    # Reads the local working tree directly (not `git show <revision>`):
+    # correct whenever `revision` matches what's checked out (`HEAD`, the
+    # overwhelming majority of real-world usage) — a deliberate v1
+    # simplification, not a silent approximation (see DESIGN.md).
+    param_sets: list[dict[str, str]] = []
+    param_sets.extend(_resolve_git_directories(repo_root, git_generator.get("directories") or []))
+    param_sets.extend(_resolve_git_files(repo_root, git_generator.get("files") or []))
+    return param_sets, []
+
+
+def _resolve_git_directories(repo_root: Path, entries: list[Any]) -> list[dict[str, str]]:
+    all_dirs = _list_local_directories(repo_root)
+    included: set[str] = set()
+    excluded: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        pattern = str(entry.get("path", ""))
+        matches = {d for d in all_dirs if _match_glob(pattern, d)}
+        if entry.get("exclude"):
+            excluded |= matches
+        else:
+            included |= matches
+
+    return [_directory_params(d) for d in sorted(included - excluded)]
+
+
+def _resolve_git_files(repo_root: Path, entries: list[Any]) -> list[dict[str, str]]:
+    all_files = _list_local_files(repo_root)
+    matched: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        pattern = str(entry.get("path", ""))
+        matched |= {f for f in all_files if _match_glob(pattern, f)}
+
+    param_sets: list[dict[str, str]] = []
+    for rel_path in sorted(matched):
+        content = _load_params_file(repo_root / rel_path)
+        if content is None:
+            continue
+        params = _flatten_params(content)
+        params.update(_directory_params(rel_path))
+        param_sets.append(params)
+    return param_sets
+
+
+def _resolve_matrix(
+    matrix_generator: dict[str, Any],
+    repo_root: Path,
+    local_origin: str | None,
+    appset_name: str,
+    source_file: Path,
+    severity: Severity,
+) -> tuple[list[dict[str, str]], list[Finding]]:
+    children = matrix_generator.get("generators") or []
+    findings: list[Finding] = []
+    param_lists: list[list[dict[str, str]]] = []
+
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        params, child_findings = _resolve_generator(
+            child, repo_root, local_origin, appset_name, source_file, severity
+        )
+        findings.extend(child_findings)
+        param_lists.append(params)
+
+    if len(param_lists) < 2 or any(not params for params in param_lists):
+        return [], findings
+
+    combined: list[dict[str, str]] = [{}]
+    for params in param_lists:
+        combined = [{**base, **entry} for base in combined for entry in params]
+    return combined, findings
+
+
+def _list_local_directories(repo_root: Path) -> list[str]:
+    return [
+        path.relative_to(repo_root).as_posix()
+        for path in repo_root.rglob("*")
+        if path.is_dir() and ".git" not in path.parts
+    ]
+
+
+def _list_local_files(repo_root: Path) -> list[str]:
+    return [
+        path.relative_to(repo_root).as_posix()
+        for path in repo_root.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    ]
+
+
+def _match_glob(pattern: str, candidate: str) -> bool:
+    """ArgoCD's git generator glob: `*` matches within one path segment,
+    `**` crosses `/` — unlike `fnmatch`, where a lone `*` already crosses
+    `/`."""
+    parts = pattern.split("**")
+    escaped = [re.escape(part).replace(r"\*", "[^/]*").replace(r"\?", ".") for part in parts]
+    return re.match("^" + ".*".join(escaped) + "$", candidate) is not None
+
+
+def _directory_params(rel_path: str) -> dict[str, str]:
+    basename = rel_path.rsplit("/", 1)[-1]
+    normalized = re.sub(r"[^A-Za-z0-9-]", "-", basename).strip("-").lower() or "x"
+    return {"path": rel_path, "path.basename": basename, "path.basenameNormalized": normalized}
+
+
+def _load_params_file(path: Path) -> Any:
+    if not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return _yaml_safe.load(f)  # valid JSON is also valid YAML
+    except (YAMLError, UnicodeDecodeError, OSError):
+        return None
+
+
+def _flatten_params(obj: Any, prefix: str = "") -> dict[str, str]:
+    flat: dict[str, str] = {}
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            dotted = f"{prefix}.{key}" if prefix else str(key)
+            flat.update(_flatten_params(value, dotted))
+    elif isinstance(obj, list):
+        if prefix:
+            flat[prefix] = str(obj)
+    elif prefix:
+        flat[prefix] = "" if obj is None else str(obj)
+    return flat
+
+
+def _substitute(value: Any, params: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return _PLACEHOLDER_RE.sub(lambda m: params.get(m.group(1), m.group(0)), value)
+    if isinstance(value, dict):
+        return {key: _substitute(v, params) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute(v, params) for v in value]
+    return value
+
+
+def _finding(app_name: str, source_file: Path, severity: Severity, message: str) -> Finding:
+    return Finding(
+        rule_id=RULE_ID,
+        severity=severity,
+        application=app_name,
+        message=message,
+        file=source_file,
+    )

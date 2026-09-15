@@ -19,6 +19,9 @@ no cluster access, no `kubeconfig`, no sensitive data involved.
   no `ignoreDifferences` while `selfHeal: true` is active.
 - `phantom-target` — a `targetRevision`/`path` that resolves to nothing in
   the repo.
+- `unresolvable-generator` — an `ApplicationSet` generator this tool can't
+  resolve from a local checkout alone (live cluster/API access, or
+  `goTemplate: true` rendering).
 
 ## What the tool does not do (v1)
 
@@ -29,7 +32,12 @@ no cluster access, no `kubeconfig`, no sensitive data involved.
   generators to know which files in the overlay are actually referenced,
   the same signal as a plain directory source (see DESIGN.md); a remote
   resource reference is silently skipped, not guessed at.
-- No `ApplicationSet` support (dynamic generators).
+- `ApplicationSet` support covers `list`, `git` (`directories`/`files`)
+  and `matrix` generators — each generated `Application` goes through
+  the same rules as a plain one. `clusters`/`scmProvider`/`pullRequest`/
+  `merge`/`plugin` generators and `goTemplate: true` rendering require
+  live cluster/API access or a different templating engine — out of
+  scope v1, flagged `unresolvable-generator` rather than guessed at.
 - Multi-repo `Application` resources (sources pointing to a repo other
   than the one analyzed) are detected and flagged `info`, never checked
   nor silently ignored.
@@ -71,6 +79,7 @@ rules:
   broken-values-ref: error
   missing-ignore-diff: warning
   phantom-target: error
+  unresolvable-generator: info
 
 unverifiable_blocks_ci: true
 
@@ -108,7 +117,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.5
+- uses: gillesl-dev/argocd-source-lint@v0.1.6
   with:
     path: .
 ```
@@ -117,7 +126,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.5
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.6
     inputs:
       scope: manifests/
 ```
@@ -127,7 +136,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.5
+    rev: v0.1.6
     hooks:
       - id: argocd-source-lint
 ```
