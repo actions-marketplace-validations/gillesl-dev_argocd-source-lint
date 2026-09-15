@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-    { name = "Oodrive" },
+    { name = "gillesl-dev" },
 ]
 keywords = ["argocd", "gitops", "kubernetes", "lint", "static-analysis"]
 classifiers = [
