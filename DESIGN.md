@@ -37,12 +37,23 @@ than assumed:
 - `directory.include`/`exclude` is a glob pattern, or several comma
   separated ones wrapped in braces (`{a,b}`), matched against the path
   relative to the source's `path`.
-- A `path` containing a `kustomization.yaml` or `Chart.yaml` is treated as
-  opaque and considered fully covered rather than partially interpreted —
-  rendering Kustomize overlays or Helm charts is out of scope for v1
-  (delegate to a dedicated Kustomize linter), so guessing at their
-  contents would just produce noise on directories the tool can't
-  actually interpret.
+- A `path` containing a `Chart.yaml` is treated as opaque and considered
+  fully covered rather than partially interpreted — rendering a Helm
+  chart's templates is out of scope for v1 (delegate to `helm template`/a
+  dedicated linter), so guessing at their contents would just produce
+  noise on a directory the tool can't actually interpret.
+- A `path` containing a `kustomization.yaml` (or `.yml`/no extension) is
+  **not** opaque: `coverage.py` parses it (`resources`/`bases`/
+  `components`/`crds`, recursing into a directory reference;
+  `patches`/`patchesStrategicMerge`/`patchesJson6902`;
+  `configMapGenerator`/`secretGenerator` `files`/`envs`/`envFile`) and
+  marks only what's actually referenced as covered — a manifest sitting
+  in the overlay but never listed is a real `orphan-source` finding, the
+  same signal as an unreferenced file in a plain directory source, one
+  level deeper. A reference that doesn't resolve to a local file/directory
+  (a git URL, an SCM shorthand) is silently skipped rather than guessed
+  at or flagged: verifying a remote resource is out of scope, same
+  principle as an external `Application` source.
 
 ## SARIF vs GitLab Code Quality
 

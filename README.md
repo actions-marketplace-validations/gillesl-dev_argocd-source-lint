@@ -23,8 +23,12 @@ no cluster access, no `kubeconfig`, no sensitive data involved.
 ## What the tool does not do (v1)
 
 - No cluster access.
-- No native Kustomize coverage (a directory with `kustomization.yaml` is
-  treated as a black box — delegate to a dedicated Kustomize linter).
+- No Kustomize *rendering* (bases merged, patches applied) — delegate to
+  `kustomize build`/a dedicated linter for that. `orphan-source` does
+  read `kustomization.yaml`'s `resources`/`bases`/`components`/`patches`/
+  generators to know which files in the overlay are actually referenced,
+  the same signal as a plain directory source (see DESIGN.md); a remote
+  resource reference is silently skipped, not guessed at.
 - No `ApplicationSet` support (dynamic generators).
 - Multi-repo `Application` resources (sources pointing to a repo other
   than the one analyzed) are detected and flagged `info`, never checked
@@ -104,7 +108,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.4
+- uses: gillesl-dev/argocd-source-lint@v0.1.5
   with:
     path: .
 ```
@@ -113,7 +117,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.4
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.5
     inputs:
       scope: manifests/
 ```
@@ -123,7 +127,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.4
+    rev: v0.1.5
     hooks:
       - id: argocd-source-lint
 ```

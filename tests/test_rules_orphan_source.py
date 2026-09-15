@@ -317,9 +317,11 @@ spec:
     assert findings[0].file.as_posix() == "bootstrap/argocd-apps/bootstrap-apps.yaml"
 
 
-def test_kustomize_directory_is_treated_as_opaque_and_fully_covered(git_repo):
-    """Out of scope v1 (delegated to kustomize-lint): we don't render the
-    overlay, so we report nothing rather than produce noise."""
+def test_kustomize_directory_with_fully_referenced_resources_has_no_finding(git_repo):
+    """A Kustomize overlay is no longer a black box (see DESIGN.md): every
+    file actually listed in `kustomization.yaml` (however deep the
+    `resources:` chain goes) is covered, so a fully-referenced overlay
+    still reports nothing."""
     repo_root = git_repo(
         {
             ".argocd-lint.yaml": "scan_roots:\n  - manifests/\n",
@@ -342,6 +344,36 @@ spec:
     findings = _run_orphan_source(repo_root)
 
     assert findings == []
+
+
+def test_kustomize_file_not_in_resources_is_flagged_as_orphan(git_repo):
+    """The other side of the same coin: a manifest sitting in the overlay
+    directory but never listed in `resources:` is a real orphan, exactly
+    like a plain directory source — Kustomize no longer masks this."""
+    repo_root = git_repo(
+        {
+            ".argocd-lint.yaml": "scan_roots:\n  - manifests/\n",
+            "bootstrap/argocd-apps/demo-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/demo-app
+""",
+            "manifests/demo-app/kustomization.yaml": "resources:\n  - deployment.yaml\n",
+            "manifests/demo-app/deployment.yaml": "kind: Deployment\n",
+            "manifests/demo-app/forgotten.yaml": "kind: ConfigMap\n",
+        }
+    )
+
+    findings = _run_orphan_source(repo_root)
+
+    assert len(findings) == 1
+    assert findings[0].file.as_posix() == "manifests/demo-app/forgotten.yaml"
 
 
 def test_no_scan_roots_configured_scans_nothing(git_repo):
