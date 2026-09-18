@@ -71,7 +71,7 @@ flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
     B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation"]
     C --> D{"Policy<br/>severity overrides + baseline"}
-    D --> E["Reporters<br/>table, json, sarif, gitlab-codequality"]
+    D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
 
 Everything left of the policy step is pure filesystem/git reading — no
@@ -116,7 +116,7 @@ pip install argocd-source-lint
 # From the root of the repo to analyze
 argocd-source-lint .
 
-# Output formats: table (default), json, sarif, gitlab-codequality
+# Output formats: table (default), json, sarif, gitlab-codequality, junit
 argocd-source-lint . --format sarif --output results.sarif
 ```
 
@@ -183,7 +183,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.12
+- uses: gillesl-dev/argocd-source-lint@v0.1.13
   with:
     path: .
 ```
@@ -192,7 +192,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.12
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.13
     inputs:
       scope: manifests/
 ```
@@ -202,7 +202,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.12
+    rev: v0.1.13
     hooks:
       - id: argocd-source-lint
 ```

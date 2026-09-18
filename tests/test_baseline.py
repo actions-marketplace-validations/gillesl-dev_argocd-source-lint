@@ -6,6 +6,7 @@ from argocd_source_lint.baseline import (
     DEFAULT_BASELINE_FILENAME,
     load_baseline,
     split_by_baseline,
+    stale_baseline_entries,
     write_baseline,
 )
 from argocd_source_lint.models import Finding, Severity
@@ -60,3 +61,29 @@ def test_write_baseline_overwrites_previous_content(tmp_path):
 
     assert new == [_ACCEPTED]
     assert known == [_NEW]
+
+
+def test_stale_baseline_entries_is_empty_when_everything_still_matches(tmp_path):
+    write_baseline(tmp_path, [_ACCEPTED])
+    baseline = load_baseline(tmp_path)
+
+    assert stale_baseline_entries([_ACCEPTED, _NEW], baseline) == set()
+
+
+def test_stale_baseline_entries_reports_a_fixed_finding(tmp_path):
+    write_baseline(tmp_path, [_ACCEPTED, _NEW])
+    baseline = load_baseline(tmp_path)
+
+    # _NEW is no longer produced by this run -- its manifest was fixed.
+    stale = stale_baseline_entries([_ACCEPTED], baseline)
+
+    assert len(stale) == 1
+    rule_id, file, application, message = next(iter(stale))
+    assert rule_id == _NEW.rule_id
+    assert file == _NEW.file.as_posix()
+    assert application == _NEW.application
+    assert message == _NEW.message
+
+
+def test_stale_baseline_entries_is_empty_without_a_baseline_file(tmp_path):
+    assert stale_baseline_entries([_ACCEPTED], load_baseline(tmp_path)) == set()

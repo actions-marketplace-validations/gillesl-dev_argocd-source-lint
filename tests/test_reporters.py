@@ -3,11 +3,12 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from rich.console import Console
 
 from argocd_source_lint.models import Finding, Severity
-from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
+from argocd_source_lint.reporters import gitlab_codequality, json_report, junit, sarif
 from argocd_source_lint.reporters.table import render_findings as render_table
 
 _FINDING_NO_LINE = Finding(
@@ -125,6 +126,49 @@ def test_table_prints_no_issues_message_when_findings_empty():
     render_table(console, [])
 
     assert "No issues detected." in console.file.getvalue()
+
+
+def test_junit_marks_error_as_failure_and_warning_as_skipped():
+    root = ET.fromstring(junit.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
+
+    testsuite = root.find("testsuite")
+    assert testsuite.get("tests") == "2"
+    assert testsuite.get("failures") == "1"
+    assert testsuite.get("skipped") == "1"
+
+    testcases = testsuite.findall("testcase")
+    error_case = next(tc for tc in testcases if tc.get("classname") == "orphan-source")
+    assert error_case.find("failure") is not None
+    assert error_case.find("skipped") is None
+
+    warning_case = next(tc for tc in testcases if tc.get("classname") == "phantom-target")
+    assert warning_case.find("skipped") is not None
+    assert warning_case.find("failure") is None
+    assert warning_case.get("line") == "12"
+
+
+def test_junit_marks_unverifiable_as_failure():
+    unverifiable = Finding(
+        rule_id="phantom-target",
+        severity=Severity.UNVERIFIABLE,
+        application="demo-app",
+        message="revision missing from the local checkout",
+        file=Path("bootstrap/argocd-apps/demo-app.yaml"),
+    )
+
+    root = ET.fromstring(junit.render_findings([unverifiable]))
+
+    testcase = root.find("testsuite").find("testcase")
+    assert testcase.find("failure") is not None
+    assert testcase.find("failure").get("type") == "unverifiable"
+
+
+def test_junit_is_valid_empty_suite_when_no_findings():
+    root = ET.fromstring(junit.render_findings([]))
+
+    testsuite = root.find("testsuite")
+    assert testsuite.get("tests") == "0"
+    assert testsuite.findall("testcase") == []
 
 
 def test_gitlab_codequality_fingerprint_is_stable_and_unique():

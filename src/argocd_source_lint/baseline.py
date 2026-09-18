@@ -81,3 +81,14 @@ def split_by_baseline(
     for finding in findings:
         (known if _key(finding) in baseline else new).append(finding)
     return new, known
+
+
+def stale_baseline_entries(findings: list[Finding], baseline: set[FindingKey]) -> set[FindingKey]:
+    """Baseline entries matching none of the current `findings` — the
+    underlying issue was fixed, renamed, or the file/Application removed,
+    so the entry no longer suppresses anything. Purely informational
+    (never affects the exit code): a stale entry is dead weight, not a
+    new risk, but left to grow forever it stops being something a
+    reviewer can actually read (see DESIGN.md)."""
+    current = {_key(finding) for finding in findings}
+    return baseline - current

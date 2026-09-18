@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from xml.etree import ElementTree as ET
 
 from typer.testing import CliRunner
 
@@ -65,6 +66,34 @@ def test_new_finding_still_blocks_ci_after_baselining_a_different_one(fixture_re
     assert result.exit_code == 1
     assert "phantom-target" not in result.stdout
     assert "orphan-source" in result.stdout
+
+
+def test_stale_baseline_entry_is_reported_but_does_not_block_ci(fixture_repo, git_commit):
+    repo_root = fixture_repo("bad_phantom_target")
+    runner.invoke(app, [str(repo_root), "--write-baseline"])
+    # The underlying issue is fixed: the missing path now exists
+    # (committed -- phantom-target resolves paths via `git ls-tree`, not
+    # the raw working tree, see DESIGN.md "targetRevision drift").
+    git_commit(
+        repo_root,
+        {"manifests/does-not-exist/deployment.yaml": "kind: Deployment\n"},
+        message="fix: add the missing manifest",
+    )
+
+    result = runner.invoke(app, [str(repo_root)])
+
+    assert result.exit_code == 0
+    assert "no longer match any finding" in result.stderr
+
+
+def test_no_stale_baseline_message_when_baseline_still_fully_matches(fixture_repo):
+    repo_root = fixture_repo("bad_phantom_target")
+    runner.invoke(app, [str(repo_root), "--write-baseline"])
+
+    result = runner.invoke(app, [str(repo_root)])
+
+    assert result.exit_code == 0
+    assert "no longer match any finding" not in result.stderr
 
 
 def test_unverifiable_blocks_ci_by_default(git_repo):
@@ -150,6 +179,19 @@ def test_gitlab_codequality_format_writes_to_output_file(fixture_repo, tmp_path)
     payload = json.loads(output_file.read_text(encoding="utf-8"))
     assert isinstance(payload, list)
     assert len(payload) == 1
+
+
+def test_junit_format_writes_to_output_file(fixture_repo, tmp_path):
+    repo_root = fixture_repo("bad_phantom_target")
+    output_file = tmp_path / "junit.xml"
+
+    result = runner.invoke(app, [str(repo_root), "--format", "junit", "--output", str(output_file)])
+
+    assert result.exit_code == 1
+    root = ET.fromstring(output_file.read_text(encoding="utf-8"))
+    testsuite = root.find("testsuite")
+    assert testsuite.get("tests") == "1"
+    assert testsuite.get("failures") == "1"
 
 
 def test_table_format_writes_plain_text_to_output_file(fixture_repo, tmp_path):

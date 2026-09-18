@@ -11,13 +11,14 @@ from argocd_source_lint.baseline import (
     DEFAULT_BASELINE_FILENAME,
     load_baseline,
     split_by_baseline,
+    stale_baseline_entries,
     write_baseline,
 )
 from argocd_source_lint.git_context import get_origin_url
 from argocd_source_lint.loader import RawManifestDiscovery
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy, load_policy
-from argocd_source_lint.reporters import gitlab_codequality, json_report, sarif
+from argocd_source_lint.reporters import gitlab_codequality, json_report, junit, sarif
 from argocd_source_lint.reporters.table import render_findings as render_table
 from argocd_source_lint.rules.base import Rule
 from argocd_source_lint.rules.broken_values_ref import BrokenValuesRefRule
@@ -48,6 +49,7 @@ class OutputFormat(str, Enum):
     JSON = "json"
     SARIF = "sarif"
     GITLAB_CODEQUALITY = "gitlab-codequality"
+    JUNIT = "junit"
 
 
 def _print_version_and_exit(show: bool) -> None:
@@ -110,6 +112,13 @@ def lint(
             f"{repo_root / DEFAULT_BASELINE_FILENAME}[/dim]"
         )
 
+    stale = stale_baseline_entries(findings, baseline)
+    if stale:
+        err_console.print(
+            f"[yellow]{len(stale)} baseline entrie(s) no longer match any "
+            "finding — re-run --write-baseline to drop them[/yellow]"
+        )
+
     _report(format, new_findings, applications, repo_root, output)
 
     raise typer.Exit(code=_exit_code(new_findings, policy))
@@ -130,6 +139,8 @@ def _report(
         text = json_report.render_findings(findings)
     elif output_format == OutputFormat.SARIF:
         text = sarif.render_findings(findings)
+    elif output_format == OutputFormat.JUNIT:
+        text = junit.render_findings(findings)
     else:
         text = gitlab_codequality.render_findings(findings)
 

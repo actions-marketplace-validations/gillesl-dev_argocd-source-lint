@@ -64,6 +64,22 @@ CodeClimate-derived format instead (`severity: info|minor|major|critical`,
 `fingerprint`, `location.lines.begin`) — hence two separate reporters
 rather than one shared SARIF-based implementation.
 
+## The JUnit reporter's severity mapping
+
+JUnit XML (`reporters/junit.py`) has no native "warning"/"info" level —
+only a passing testcase, `<failure>`, `<error>`, or `<skipped>`. One
+`<testcase>` per finding, mapped to match this tool's own exit-code
+semantics rather than inventing a separate scale: `error` and
+`unverifiable` (the two severities that actually block CI by default,
+see `cli._exit_code`) become `<failure>`; `warning`/`info` become
+`<skipped>` rather than a silent pass — they're still something to look
+at, and a skipped testcase renders visually distinct (grey, not green)
+in Jenkins/GitLab/Azure DevOps alike. Deliberately not policy-aware
+(doesn't consult `unverifiable_blocks_ci`): every other reporter here
+(SARIF, GitLab Code Quality) already maps `unverifiable` to a fixed
+level regardless of whether it currently blocks CI, so this follows the
+same established precedent instead of being the one exception.
+
 ## The `unverifiable` severity
 
 A shallow, single-branch CI checkout (common in CI jobs) may not have a
@@ -105,6 +121,17 @@ used by `reporters/gitlab_codequality.py`, kept as two independent
 implementations rather than shared — one feeds an opaque MD5 for GitLab's
 UI, the other needs the fields spelled out for human review, so
 unifying them would only add an indirection neither side needs.
+
+The reverse problem exists too: an entry accepted once but never
+revisited, for an issue since fixed, renamed, or removed, still sits in
+the file forever — a baseline that only ever grows stops being
+something a reviewer can actually read. `stale_baseline_entries`
+(`baseline.py`) reports a count of exactly this to stderr on every run
+(never affecting the exit code — a stale entry is dead weight, not a
+new risk), nudging towards re-running `--write-baseline` to drop them.
+It's deliberately a nudge, not an enforced check: some teams may want
+their baseline to *stay* stable across a temporary dip in findings, and
+a hard failure here would fight that.
 
 ## `Finding.line`
 
