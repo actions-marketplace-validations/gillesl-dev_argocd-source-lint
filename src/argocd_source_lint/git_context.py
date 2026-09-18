@@ -91,6 +91,31 @@ def is_revision_resolvable(repo_root: Path, revision: str) -> bool:
     return result.returncode == 0
 
 
+def _resolve_commit(repo_root: Path, revision: str) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", f"{revision}^{{commit}}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def revision_matches_checkout(repo_root: Path, revision: str) -> bool | None:
+    """Whether `revision` resolves to the same commit as the current
+    checkout (`HEAD`) — used by `revision-mismatch` (see DESIGN.md
+    "orphan-source, missing-ignore-diff and double-coverage read the
+    working tree, not `targetRevision`"). `None` when `revision` isn't
+    resolvable at all: that's already `phantom-target`'s/
+    `broken-values-ref`'s shallow-clone case (`is_revision_resolvable`),
+    not a mismatch to report a second time."""
+    target = _resolve_commit(repo_root, revision)
+    if target is None:
+        return None
+    head = _resolve_commit(repo_root, "HEAD")
+    return head is not None and head == target
+
+
 def list_tree_paths(repo_root: Path, revision: str, pathspec: str) -> list[str]:
     """File paths under `pathspec` at `revision`. Assumes `revision` is
     already known to be resolvable (`is_revision_resolvable`) — otherwise

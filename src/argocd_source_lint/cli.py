@@ -25,6 +25,7 @@ from argocd_source_lint.rules.double_coverage import DoubleCoverageRule
 from argocd_source_lint.rules.missing_ignore_diff import MissingIgnoreDiffRule
 from argocd_source_lint.rules.orphan_source import OrphanSourceRule
 from argocd_source_lint.rules.phantom_target import PhantomTargetRule
+from argocd_source_lint.rules.revision_mismatch import RevisionMismatchRule
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -36,6 +37,7 @@ RULES: list[Rule] = [
     BrokenValuesRefRule(),
     MissingIgnoreDiffRule(),
     DoubleCoverageRule(),
+    RevisionMismatchRule(),
 ]
 
 

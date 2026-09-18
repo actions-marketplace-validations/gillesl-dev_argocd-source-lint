@@ -207,6 +207,66 @@ fighting each other, so it isn't flagged — the risk this rule targets
 loops, flapping between whichever ran last) simply doesn't exist in that
 case.
 
+## `targetRevision` drift
+
+`orphan-source`, `missing-ignore-diff` and `double-coverage` all need to
+read a local source's actual files — and until this was addressed, they
+always read them off the working tree, never off `source.targetRevision`
+itself. That's invisible on the overwhelmingly common case (an
+Application's `targetRevision` is the branch actually checked out), but
+wrong whenever it isn't — e.g. a stable production Application
+deliberately pinned to an old tag while an unrelated refactor moves on
+past it on `main`. A manifest that still exists (and is still a real
+risk) at that tag, but has since been moved/deleted on `main`, would
+never be read at all: not a false alarm, a missed one — exactly the
+category of silent failure this tool exists to catch, happening inside
+the tool itself.
+
+The fix (`coverage._resolved_source_root`): for each local source,
+`git_context.revision_matches_checkout` compares `targetRevision` against
+what's actually checked out. When it differs, `coverage._materialized_repo_root`
+extracts a full snapshot of the repo *as it existed at that revision*
+(`git archive <revision>`, piped straight into a throwaway directory via
+Python's `tarfile` — no shell `tar` dependency) and every existing
+filesystem-based helper (`covered_files_for_source`,
+`covered_files_for_kustomize_dir`, opaque-chart detection, ...) runs
+against that snapshot completely unchanged, instead of a parallel
+git-object-reading implementation that would have to be kept in sync
+with it by hand. The snapshot is a full extraction, not just the
+source's own `path`, deliberately: a Kustomize `resources:` entry
+reaching outside that `path` (a shared base one level up, say) must
+still resolve, exactly as it would against the real working tree.
+Extracted once per distinct revision and reused across every source
+pinned to it within the run; cleaned up at process exit.
+
+Two different things came out of one underlying computation, because two
+different rules need two different things from it:
+
+- `covered_files_for_application` — the repo-relative *identity* of each
+  covered file (a plain `Path`, not tied to which root — real or
+  snapshot — it was actually found under). `orphan-source` and
+  `double-coverage` only ever compare/report identities, never read file
+  content, so this is all they need.
+- `covered_documents_for_application` — the parsed YAML *content* of
+  each covered file, read from wherever it actually lives (the snapshot
+  for a divergent source). `missing-ignore-diff` is the one rule that
+  inspects file content (looking for an at-risk CRD kind), so it uses
+  this instead — reading the "as-if-repo_root" identity above would try
+  to open a file that may not even exist there anymore.
+
+A revision that isn't resolvable at all (a shallow clone missing the
+branch) is left entirely to `phantom-target`/`broken-values-ref`'s
+existing `unverifiable` handling (`is_revision_resolvable`) rather than
+guessed at here — `revision_matches_checkout` returns `None` for that
+case specifically so callers can tell "differs" apart from "unknown."
+
+`rules/revision_mismatch.py` reports the divergence itself, once per
+affected source, purely as an FYI (`info` by default, configurable) —
+not a correctness caveat, since the rules above already resolved it
+correctly: it's there so a human reading the report notices that an
+Application is pinned away from HEAD at all, which is easy to miss
+otherwise.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

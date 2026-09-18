@@ -5,8 +5,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from argocd_source_lint.coverage import covered_files_for_application
-from argocd_source_lint.fsutil import load_yaml_documents
+from argocd_source_lint.coverage import covered_documents_for_application
 from argocd_source_lint.git_context import external_path_sources
 from argocd_source_lint.models import Application, Finding, KnownOperatorSignature, Severity
 from argocd_source_lint.policy import Policy
@@ -43,9 +42,8 @@ class MissingIgnoreDiffRule(Rule):
             for source in external_path_sources(app, local_origin):
                 findings.append(external_source_finding(RULE_ID, app, source))
 
-            for manifest_path in covered_files_for_application(app, repo_root, local_origin):
-                for doc in load_yaml_documents(manifest_path):
-                    findings.extend(_check_document(app, doc, signatures, severity))
+            for doc in covered_documents_for_application(app, repo_root, local_origin):
+                findings.extend(_check_document(app, doc, signatures, severity))
 
         return findings
 

@@ -17,6 +17,10 @@ _RULES_METADATA = {
         "Go-template rendering — out of scope v1."
     ),
     "double-coverage": "A file covered by more than one different Application at once.",
+    "revision-mismatch": (
+        "A source's targetRevision differs from the checked-out revision -- "
+        "disk-based rules may not reflect what ArgoCD actually syncs."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

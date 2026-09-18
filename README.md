@@ -40,6 +40,7 @@ sensitive data involved.
 | `phantom-target` | error | a `targetRevision`/`path` that resolves to nothing in the repo |
 | `unresolvable-generator` | info | an `ApplicationSet` generator this tool can't resolve from a local checkout alone (live cluster/API access, or `goTemplate: true` rendering) |
 | `double-coverage` | error | a file covered by more than one *different* Application at once, each syncing it from an independent loop |
+| `revision-mismatch` | info | a source's `targetRevision` differs from the checked-out revision — resolved against a snapshot of that revision, this is an FYI, not a correctness caveat |
 
 Sample run, table output (the default):
 
@@ -67,7 +68,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality"]
 ```
@@ -141,6 +142,7 @@ rules:
   phantom-target: error
   unresolvable-generator: info
   double-coverage: error
+  revision-mismatch: info
 
 unverifiable_blocks_ci: true
 
@@ -178,7 +180,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.9
+- uses: gillesl-dev/argocd-source-lint@v0.1.10
   with:
     path: .
 ```
@@ -187,7 +189,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.9
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.10
     inputs:
       scope: manifests/
 ```
@@ -197,7 +199,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.9
+    rev: v0.1.10
     hooks:
       - id: argocd-source-lint
 ```

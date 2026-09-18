@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import atexit
 import fnmatch
+import shutil
+import subprocess
+import tarfile
+import tempfile
 from collections.abc import Iterator
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
-from argocd_source_lint.git_context import local_path_sources
+from argocd_source_lint.git_context import local_path_sources, revision_matches_checkout
 from argocd_source_lint.models import Application, Source
 
 # A Helm chart packaged in the repo: out of scope for v1 content
@@ -56,18 +62,97 @@ def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]
 def covered_files_for_application(
     app: Application, repo_root: Path, local_origin: str | None
 ) -> set[Path]:
-    """Every file covered by any of `app`'s local `path` sources
-    (resolved, absolute) — shared by `missing-ignore-diff` and
-    `double-coverage`. `orphan-source` uses this as its base too, layering
-    the Helm `$values` file-covering nuance on top (see
-    `rules/orphan_source.py`)."""
+    """Repo-relative identity of every file covered by any of `app`'s
+    local `path` sources — the *identity* used for dedup/reporting by
+    `orphan-source` and `double-coverage`, deliberately not tied to
+    whether the file was actually found on disk at `repo_root` or in a
+    snapshot of a divergent `targetRevision` (see `_resolved_source_root`
+    and DESIGN.md "targetRevision drift"). Neither caller ever needs to
+    open the file itself — `missing-ignore-diff` does, so it reads
+    `covered_documents_for_application` instead."""
     covered: set[Path] = set()
     for source in local_path_sources(app, local_origin):
-        source_dir = (repo_root / source.path).resolve()
-        if not source_dir.is_dir():
+        resolved = _resolved_source_root(repo_root, source)
+        if resolved is None:
             continue
-        covered.update(p.resolve() for p in covered_files_for_source(source_dir, source))
+        base_root, source_dir = resolved
+        for found in covered_files_for_source(source_dir, source):
+            covered.add(found.resolve().relative_to(base_root))
     return covered
+
+
+def covered_documents_for_application(
+    app: Application, repo_root: Path, local_origin: str | None
+) -> Iterator[dict[str, Any]]:
+    """Every YAML document actually covered by any of `app`'s local `path`
+    sources, parsed — used exclusively by `missing-ignore-diff`, the only
+    rule that needs real file content rather than just path identity: a
+    source pinned to a divergent `targetRevision` is read from its
+    materialized snapshot directly, never from the (possibly nonexistent)
+    `repo_root`-shaped identity `covered_files_for_application` reports."""
+    for source in local_path_sources(app, local_origin):
+        resolved = _resolved_source_root(repo_root, source)
+        if resolved is None:
+            continue
+        _base_root, source_dir = resolved
+        for found in covered_files_for_source(source_dir, source):
+            yield from load_yaml_documents(found)
+
+
+def _resolved_source_root(repo_root: Path, source: Source) -> tuple[Path, Path] | None:
+    """`(base_root, source_dir)` for `source`: `base_root` is `repo_root`,
+    or a materialized snapshot of `source.target_revision` when that
+    differs from what's checked out. `None` if the resulting directory
+    doesn't exist there."""
+    base_root = repo_root
+    if revision_matches_checkout(repo_root, source.target_revision) is False:
+        snapshot_root = _materialized_repo_root(repo_root, source.target_revision)
+        if snapshot_root is None:
+            return None
+        base_root = snapshot_root
+
+    source_dir = (base_root / source.path).resolve()
+    if not source_dir.is_dir():
+        return None
+    return base_root, source_dir
+
+
+_REVISION_SNAPSHOT_CACHE: dict[tuple[Path, str], Path | None] = {}
+
+
+def _materialized_repo_root(repo_root: Path, revision: str) -> Path | None:
+    """A full extraction of `repo_root` as it existed at `revision` into a
+    throwaway directory, so the existing (filesystem-based) coverage logic
+    below can be reused completely unchanged — including cross-directory
+    Kustomize references, which a partial extraction of just the source's
+    own `path` would silently fail to resolve. Reused across every source
+    pinned to the same revision within this run; cleaned up at process
+    exit. `None` if `revision` doesn't produce a tree (shouldn't happen —
+    callers only reach this after `revision_matches_checkout` confirmed it
+    resolves)."""
+    cache_key = (repo_root, revision)
+    if cache_key in _REVISION_SNAPSHOT_CACHE:
+        return _REVISION_SNAPSHOT_CACHE[cache_key]
+
+    result = subprocess.run(
+        ["git", "archive", revision],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    snapshot_root: Path | None = None
+    if result.returncode == 0 and result.stdout:
+        # `.resolve()`: on Windows, `tempfile.mkdtemp()` can return a
+        # short (8.3) path form that a file's own `.resolve()` inside it
+        # never reproduces, breaking `relative_to()` below on a textual
+        # mismatch despite being the same directory.
+        tmp_root = Path(tempfile.mkdtemp(prefix="argocd-source-lint-")).resolve()
+        atexit.register(shutil.rmtree, tmp_root, ignore_errors=True)
+        with tarfile.open(fileobj=BytesIO(result.stdout)) as tar:
+            tar.extractall(tmp_root, filter="data")
+        snapshot_root = tmp_root
+
+    _REVISION_SNAPSHOT_CACHE[cache_key] = snapshot_root
+    return snapshot_root
 
 
 def is_opaque_tool_directory(source_dir: Path) -> bool:

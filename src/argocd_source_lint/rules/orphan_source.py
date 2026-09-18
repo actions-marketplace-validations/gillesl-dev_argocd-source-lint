@@ -42,7 +42,7 @@ class OrphanSourceRule(Rule):
             # "chart + $values" Application produces a systematic false
             # positive.
             for rel_path in _referenced_value_file_paths(app, local_origin):
-                covered.add((repo_root / rel_path).resolve())
+                covered.add(Path(rel_path))
 
         for scan_root in policy.scan_roots:
             scan_dir = (repo_root / scan_root).resolve()
@@ -50,9 +50,9 @@ class OrphanSourceRule(Rule):
                 continue
             for candidate in iter_yaml_files(scan_dir):
                 resolved = candidate.resolve()
-                if resolved in covered:
-                    continue
                 relative = resolved.relative_to(repo_root)
+                if relative in covered:
+                    continue
                 if _is_excluded(relative, policy.exclude_paths):
                     continue
                 if _has_ignore_marker(resolved):

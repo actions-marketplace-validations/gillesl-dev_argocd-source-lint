@@ -46,6 +46,38 @@ def git_repo(tmp_path: Path) -> Callable[..., Path]:
 
 
 @pytest.fixture
+def git_tag() -> Callable[[Path, str], None]:
+    """Tags the current HEAD of a `git_repo`/`fixture_repo` repo."""
+
+    def _tag(repo_root: Path, name: str) -> None:
+        _run_git("tag", name, cwd=repo_root)
+
+    return _tag
+
+
+@pytest.fixture
+def git_commit() -> Callable[..., None]:
+    """Writes/deletes files (`None` value = delete) in an existing
+    `git_repo`/`fixture_repo` repo and commits the result — for building a
+    second revision that diverges from one already tagged."""
+
+    def _make(
+        repo_root: Path, files: dict[str, str | None], message: str = "second commit"
+    ) -> None:
+        for relative_path, content in files.items():
+            file_path = repo_root / relative_path
+            if content is None:
+                file_path.unlink(missing_ok=True)
+            else:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(content, encoding="utf-8")
+        _run_git("add", "-A", cwd=repo_root)
+        _run_git("commit", "-q", "--allow-empty", "-m", message, cwd=repo_root)
+
+    return _make
+
+
+@pytest.fixture
 def fixture_repo(tmp_path: Path) -> Callable[..., Path]:
     """Copies tests/fixtures/<name>/ into tmp_path and turns it into a real
     Git repo (same default `origin` remote as `git_repo`)."""

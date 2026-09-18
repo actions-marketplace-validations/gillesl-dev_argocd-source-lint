@@ -38,6 +38,58 @@ def test_bad_fixture_flags_both_expected_secrets(fixture_repo):
     assert all(f.line == 13 for f in findings)  # the `selfHeal: true` line
 
 
+def test_pinned_target_revision_is_checked_against_that_revision_not_head(
+    git_repo, git_tag, git_commit
+):
+    """The whole point of `coverage.py`'s revision-aware snapshot (see
+    DESIGN.md "targetRevision drift"): removing the risky manifest from
+    HEAD must not silence the finding for an Application still pinned to
+    the revision where it's still live in production."""
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/pg-prod-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pg-prod
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: v1.0
+    path: manifests/postgres
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "manifests/postgres/cluster.yaml": """\
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-prod
+""",
+        }
+    )
+    git_tag(repo_root, "v1.0")
+    # HEAD moves on: an unrelated refactor removes the Cluster manifest
+    # from manifests/postgres/, but pg-prod (a stable prod app) still
+    # targets v1.0, unchanged.
+    git_commit(
+        repo_root,
+        {
+            "manifests/postgres/cluster.yaml": None,
+            "manifests/postgres/README.md": "moved elsewhere\n",
+        },
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 2
+    assert all(f.rule_id == "missing-ignore-diff" for f in findings)
+    messages = {f.message for f in findings}
+    assert any("pg-prod-app" in m for m in messages)
+    assert any("pg-prod-ca" in m for m in messages)
+
+
 def test_matching_ignore_diff_by_exact_name_suppresses_finding(git_repo):
     repo_root = git_repo(
         {
