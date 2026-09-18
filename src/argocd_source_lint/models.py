@@ -71,6 +71,30 @@ class Application(BaseModel):
     self_heal_line: int | None = None
     ignore_differences: list[IgnoreDiffRule] = Field(default_factory=list)
     source_file: Path
+    # `spec.project` (defaults to "default", same as ArgoCD itself) and
+    # `spec.destination` — used by `project-scope-violation` only.
+    project: str = "default"
+    project_line: int | None = None
+    destination_server: str | None = None
+    destination_name: str | None = None
+    destination_namespace: str | None = None
+
+
+class AppProjectDestination(BaseModel):
+    server: str | None = None
+    name: str | None = None
+    namespace: str | None = None
+
+
+class AppProject(BaseModel):
+    """`kind: AppProject` — used only by `project-scope-violation` to
+    check an Application's sources/destination against the scope its own
+    `spec.project` grants it."""
+
+    name: str
+    source_repos: list[str] = Field(default_factory=list)
+    destinations: list[AppProjectDestination] = Field(default_factory=list)
+    source_file: Path
 
 
 class Finding(BaseModel):

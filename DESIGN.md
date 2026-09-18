@@ -267,6 +267,63 @@ correctly: it's there so a human reading the report notices that an
 Application is pinned away from HEAD at all, which is easy to miss
 otherwise.
 
+## `project-scope-violation`
+
+An Application's `spec.project` restricts which repos it may sync from
+and which destinations it may sync to (`AppProject.spec.sourceRepos`/
+`destinations`). Outside that scope, ArgoCD refuses to sync — but
+nothing in the repo itself looks wrong, so from a Git-only point of view
+it's silent, exactly the failure mode this tool exists for. It's also
+fully static: pure string/glob matching between manifests already in
+the repo (the Application and its own `AppProject`), no cluster access
+needed.
+
+The matching semantics are deliberately *not* a single shared helper
+applied uniformly — because ArgoCD itself doesn't use one. Read directly
+from ArgoCD's own source
+(`AppProject.IsSourcePermitted`/`isDestinationMatched` in
+`app_project_types.go`) rather than assumed, since guessing here nearly
+produced two confidently wrong results during development:
+
+- `sourceRepos`: a bare `*` always matches unconditionally — a special
+  case in ArgoCD's own `globMatch` wrapper that bypasses the glob engine
+  entirely, not something a general-purpose glob library would do on its
+  own. Any other pattern is a `/`-segment-bounded glob (`*` within one
+  segment, `**` crosses — the same semantics as the `git` ApplicationSet
+  generator's `directories`/`files`, see above), matched against both
+  the pattern and the Application's `repoURL` normalized the same way
+  `git_context.normalize_repo_url` already does elsewhere in this tool
+  (ArgoCD normalizes both sides too, via its own `git.NormalizeGitURL`),
+  so a harmless ssh-vs-https or trailing-`.git` difference isn't a false
+  violation.
+- `destinations` (`server`/`name`/`namespace`): an *unbounded* glob —
+  ArgoCD calls the same underlying matcher without any separator
+  argument here, so `*` crosses `/` freely, unlike `sourceRepos`.
+  Deliberately not `fnmatch.fnmatch` (case-insensitive on Windows) but
+  `fnmatchcase`: a namespace/server/cluster name is case-sensitive data,
+  not a filesystem path, and matching should be identical however the
+  tool is run.
+- `destination.name` vs `destination.server`: resolving one against the
+  other requires knowing which live cluster a nickname (`name`) actually
+  points to — cluster/API access this tool doesn't have. When the
+  Application and its `AppProject` destinations don't share a
+  comparable field (app uses `server`, every project entry only has
+  `name`, or vice versa), that's flagged `info` rather than guessed at
+  either way — matching everything or matching nothing would both be a
+  coin flip.
+- A negated (`!`-prefixed) `sourceRepos`/`destinations` entry is flagged
+  `info` instead of evaluated: ArgoCD's own negation logic (a deny match
+  short-circuits, but a deny *non*-match counts toward the positive
+  total too) is confusing enough that the community has open bug reports
+  about its surprises — not something to reimplement with confidence.
+
+A `project:` not found anywhere in the repo is either ArgoCD's own
+auto-created, permissive `"default"` (silently assumed, since flagging
+it would be noise on the overwhelming majority of repos that never
+declare it explicitly) or a named project genuinely managed elsewhere —
+flagged `info` in the second case, never silently treated as "no
+restriction" the way a missing `"default"` is.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

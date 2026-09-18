@@ -21,6 +21,10 @@ _RULES_METADATA = {
         "A source's targetRevision differs from the checked-out revision -- "
         "disk-based rules may not reflect what ArgoCD actually syncs."
     ),
+    "project-scope-violation": (
+        "An Application's source or destination is outside the sourceRepos/"
+        "destinations scope of its own AppProject."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

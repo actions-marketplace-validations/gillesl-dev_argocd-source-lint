@@ -13,6 +13,7 @@ rules:
   unresolvable-generator: info
   double-coverage: error
   revision-mismatch: info
+  project-scope-violation: error
 
 # Default: true (fail-closed). Only set to false knowingly if the team
 # accepts running on an incomplete shallow clone in CI.

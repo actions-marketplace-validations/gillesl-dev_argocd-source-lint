@@ -9,6 +9,7 @@ from ruamel.yaml.error import YAMLError
 
 from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
 from argocd_source_lint.git_context import is_local_repo_url
+from argocd_source_lint.globs import match_glob
 from argocd_source_lint.loader import build_application
 from argocd_source_lint.models import Application, Finding, Severity
 
@@ -211,7 +212,7 @@ def _resolve_git_directories(repo_root: Path, entries: list[Any]) -> list[dict[s
         if not isinstance(entry, dict):
             continue
         pattern = str(entry.get("path", ""))
-        matches = {d for d in all_dirs if _match_glob(pattern, d)}
+        matches = {d for d in all_dirs if match_glob(pattern, d)}
         if entry.get("exclude"):
             excluded |= matches
         else:
@@ -227,7 +228,7 @@ def _resolve_git_files(repo_root: Path, entries: list[Any]) -> list[dict[str, st
         if not isinstance(entry, dict):
             continue
         pattern = str(entry.get("path", ""))
-        matched |= {f for f in all_files if _match_glob(pattern, f)}
+        matched |= {f for f in all_files if match_glob(pattern, f)}
 
     param_sets: list[dict[str, str]] = []
     for rel_path in sorted(matched):
@@ -347,15 +348,6 @@ def _list_local_files(repo_root: Path) -> list[str]:
         for path in repo_root.rglob("*")
         if path.is_file() and ".git" not in path.parts
     ]
-
-
-def _match_glob(pattern: str, candidate: str) -> bool:
-    """ArgoCD's git generator glob: `*` matches within one path segment,
-    `**` crosses `/` — unlike `fnmatch`, where a lone `*` already crosses
-    `/`."""
-    parts = pattern.split("**")
-    escaped = [re.escape(part).replace(r"\*", "[^/]*").replace(r"\?", ".") for part in parts]
-    return re.match("^" + ".*".join(escaped) + "$", candidate) is not None
 
 
 def _directory_params(rel_path: str) -> dict[str, str]:

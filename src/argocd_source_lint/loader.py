@@ -55,6 +55,8 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
         _build_ignore_diff_rule(raw) for raw in spec.get("ignoreDifferences", []) or []
     ]
 
+    destination = spec.get("destination") or {}
+
     try:
         source_file = manifest_path.relative_to(repo_root)
     except ValueError:
@@ -68,6 +70,11 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
         self_heal_line=self_heal_line,
         ignore_differences=ignore_differences,
         source_file=source_file,
+        project=spec.get("project") or "default",
+        project_line=_key_line(spec, "project"),
+        destination_server=destination.get("server"),
+        destination_name=destination.get("name"),
+        destination_namespace=destination.get("namespace"),
     )
 
 

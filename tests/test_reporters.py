@@ -67,6 +67,7 @@ def test_sarif_structure_and_severity_mapping():
         "unresolvable-generator",
         "double-coverage",
         "revision-mismatch",
+        "project-scope-violation",
     }
 
     results = run["results"]

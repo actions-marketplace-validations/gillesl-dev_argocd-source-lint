@@ -15,6 +15,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "unresolvable-generator": Severity.INFO,
     "double-coverage": Severity.ERROR,
     "revision-mismatch": Severity.INFO,
+    "project-scope-violation": Severity.ERROR,
 }
 
 
