@@ -404,6 +404,59 @@ that validation is off. `info` by default (not `warning`/`error`): the
 flag is explicit in the manifest, not hidden the way this tool's other
 findings are, so it's a nudge to double-check, not a presumed mistake.
 
+## `duplicate-application-name`
+
+ArgoCD keys an `Application` by `(namespace, name)` — its own internal
+identity, the same as any other Kubernetes object. Two manifests
+declaring the same pair don't show anything wrong when read on their
+own; the collision only surfaces once both are applied, and even then
+as one silently overwriting or fighting the other rather than a clear
+error (confirmed against several real reports, not assumed —
+[argoproj/argo-cd#9420](https://github.com/argoproj/argo-cd/issues/9420),
+[#23808](https://github.com/argoproj/argo-cd/issues/23808), which notes
+an `ApplicationSet`-generated duplicate "replaces previous instance
+without warning"). Exactly the class of bug this tool exists for.
+
+The check runs against the `applications` list a rule receives as-is —
+by the time rules run, that list already merges plain manifests with
+every `ApplicationSet`-generated `Application` (see `cli.py`), so a
+collision is caught the same way regardless of which side of the
+collision is templated. Two generated entries colliding with each other
+(the same `ApplicationSet`'s own generator rendering the same name
+twice, e.g. a typo'd `elements` list) share the same `source_file` — the
+`ApplicationSet`'s own manifest, per `Finding.line`'s existing note
+above — so it's de-duplicated to one mention rather than listed twice.
+
+`namespace` defaults to `"argocd"` when omitted (same as ArgoCD itself,
+consistent with `project-scope-violation`'s own default handling) — in
+practice almost every real repo puts every Application in the same
+namespace, so this mostly reduces to "duplicate name", full stop; the
+namespace is tracked mainly for the rare "Applications in any namespace"
+setup, not because same-name-different-namespace collisions are known
+to be common.
+
+## `malformed-ignore-diff-pointer`
+
+`ignoreDifferences[].jsonPointers` follows
+[RFC 6901](https://www.rfc-editor.org/rfc/rfc6901): every pointer must
+start with `/`, one segment per `/`. A pointer written as `spec.replicas`
+or `spec/replicas` (missing the leading slash) resolves to nothing, so
+the rule silently ignores nothing — the field it was meant to protect
+still shows up in every diff, and still gets reverted on every
+`selfHeal` reconciliation exactly as if `ignoreDifferences` had never
+been written. A genuinely common mistake, not a hypothetical one: dot
+notation copied from a different tool's path syntax (JSONPath, Lua) is
+the most frequent variant reported.
+
+Deliberately not a heuristic: RFC 6901 makes "does this start with `/`"
+an objective yes/no, unlike e.g. `missing-ignore-diff`'s pattern
+matching. `jqPathExpressions` (the other `ignoreDifferences` matcher)
+isn't checked the same way — validating `jq` syntax would need an actual
+`jq` parser (a `libjq` binding), a real dependency for uncertain payoff,
+and most of the community-reported `jqPathExpressions` problems turn out
+to be ArgoCD-side behavior quirks that vary by version rather than
+authoring mistakes a static check could catch reliably.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

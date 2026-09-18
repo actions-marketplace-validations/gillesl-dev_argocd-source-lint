@@ -33,6 +33,14 @@ _RULES_METADATA = {
         "Validate=false sync option skips schema validation -- an invalid manifest is "
         "applied anyway instead of blocking."
     ),
+    "duplicate-application-name": (
+        "Two or more Applications share the same namespace+name -- ArgoCD keys "
+        "Applications by that pair, so one silently overwrites/fights the other."
+    ),
+    "malformed-ignore-diff-pointer": (
+        "An ignoreDifferences jsonPointers entry doesn't start with / (RFC 6901) -- "
+        "it matches nothing, so the field isn't actually ignored."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

@@ -18,6 +18,8 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "project-scope-violation": Severity.ERROR,
     "hpa-selfheal-conflict": Severity.WARNING,
     "sync-validation-disabled": Severity.INFO,
+    "duplicate-application-name": Severity.ERROR,
+    "malformed-ignore-diff-pointer": Severity.WARNING,
 }
 
 

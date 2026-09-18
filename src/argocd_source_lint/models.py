@@ -70,6 +70,10 @@ class Application(BaseModel):
     # `Finding.line` (best-effort, None when unavailable).
     self_heal_line: int | None = None
     ignore_differences: list[IgnoreDiffRule] = Field(default_factory=list)
+    # Line of the `ignoreDifferences` key itself -- best-effort anchor for
+    # `malformed-ignore-diff-pointer` (a specific entry's own line isn't
+    # tracked, same trade-off as `self_heal_line`/`sync_options_line`).
+    ignore_differences_line: int | None = None
     # `spec.syncPolicy.syncOptions` verbatim (e.g. "RespectIgnoreDifferences=true",
     # "Validate=false") — used by `hpa-selfheal-conflict`/`sync-validation-disabled`.
     sync_options: list[str] = Field(default_factory=list)

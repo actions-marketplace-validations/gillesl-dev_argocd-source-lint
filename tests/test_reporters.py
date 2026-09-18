@@ -71,6 +71,8 @@ def test_sarif_structure_and_severity_mapping():
         "project-scope-violation",
         "hpa-selfheal-conflict",
         "sync-validation-disabled",
+        "duplicate-application-name",
+        "malformed-ignore-diff-pointer",
     }
 
     results = run["results"]

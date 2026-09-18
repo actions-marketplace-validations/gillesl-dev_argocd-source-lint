@@ -44,6 +44,8 @@ sensitive data involved.
 | `project-scope-violation` | error | an Application's source or destination is outside the `sourceRepos`/`destinations` scope of its own `AppProject` |
 | `hpa-selfheal-conflict` | warning | a `HorizontalPodAutoscaler` and `selfHeal: true` both managing `spec.replicas` without `ignoreDifferences` **and** the `RespectIgnoreDifferences` sync option — ArgoCD resets the HPA's replica count on every sync |
 | `sync-validation-disabled` | info | `Validate=false` sync option — an invalid manifest is applied anyway instead of blocking |
+| `duplicate-application-name` | error | two or more Applications share the same namespace+name — ArgoCD keys an Application by that pair, so one silently overwrites/fights the other |
+| `malformed-ignore-diff-pointer` | warning | an `ignoreDifferences` `jsonPointers` entry doesn't start with `/` (RFC 6901) — it matches nothing, so the field isn't actually ignored |
 
 Sample run, table output (the default):
 
@@ -71,7 +73,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -149,6 +151,8 @@ rules:
   project-scope-violation: error
   hpa-selfheal-conflict: warning
   sync-validation-disabled: info
+  duplicate-application-name: error
+  malformed-ignore-diff-pointer: warning
 
 unverifiable_blocks_ci: true
 
@@ -187,7 +191,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.15
+- uses: gillesl-dev/argocd-source-lint@v0.1.16
   with:
     path: .
 ```
@@ -196,7 +200,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.15
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.16
     inputs:
       scope: manifests/
 ```
@@ -206,7 +210,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.15
+    rev: v0.1.16
     hooks:
       - id: argocd-source-lint
 ```

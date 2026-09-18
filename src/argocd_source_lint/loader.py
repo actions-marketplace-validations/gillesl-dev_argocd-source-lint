@@ -57,6 +57,7 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
     ignore_differences = [
         _build_ignore_diff_rule(raw) for raw in spec.get("ignoreDifferences", []) or []
     ]
+    ignore_differences_line = _key_line(spec, "ignoreDifferences") if ignore_differences else None
 
     destination = spec.get("destination") or {}
 
@@ -72,6 +73,7 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
         sync_policy_self_heal=self_heal,
         self_heal_line=self_heal_line,
         ignore_differences=ignore_differences,
+        ignore_differences_line=ignore_differences_line,
         sync_options=sync_options,
         sync_options_line=sync_options_line,
         source_file=source_file,
