@@ -146,6 +146,15 @@ def _resolve_generator(
             source_file,
             severity,
         )
+    if "merge" in generator:
+        return _resolve_merge(
+            generator.get("merge") or {},
+            repo_root,
+            local_origin,
+            appset_name,
+            source_file,
+            severity,
+        )
 
     kind = next(iter(generator), "unknown")
     return [], [
@@ -259,6 +268,69 @@ def _resolve_matrix(
     for params in param_lists:
         combined = [{**base, **entry} for base in combined for entry in params]
     return combined, findings
+
+
+def _resolve_merge(
+    merge_generator: dict[str, Any],
+    repo_root: Path,
+    local_origin: str | None,
+    appset_name: str,
+    source_file: Path,
+    severity: Severity,
+) -> tuple[list[dict[str, str]], list[Finding]]:
+    merge_keys = [str(key) for key in (merge_generator.get("mergeKeys") or [])]
+    if not merge_keys:
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                severity,
+                "merge generator has no `mergeKeys` — matching semantics are "
+                "unspecified upstream, this tool doesn't guess at them.",
+            )
+        ]
+
+    children = merge_generator.get("generators") or []
+    findings: list[Finding] = []
+    child_results: list[tuple[list[dict[str, str]], bool]] = []
+
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        params, child_findings = _resolve_generator(
+            child, repo_root, local_origin, appset_name, source_file, severity
+        )
+        findings.extend(child_findings)
+        child_results.append((params, bool(child_findings)))
+
+    if not child_results:
+        return [], findings
+
+    base_params, base_unresolvable = child_results[0]
+    if base_unresolvable:
+        # No base entries to match against at all — same reasoning as
+        # matrix's cross product being empty when a factor is empty.
+        return [], findings
+
+    # Base entries are kept even without a match in a later generator
+    # (see DESIGN.md); a later generator only overrides fields on an
+    # entry whose merge keys already match one from the base, and its
+    # own non-matching entries are discarded rather than added as new
+    # ones. An unresolvable later generator just contributes no override
+    # — its own finding above already flags the gap, so this doesn't
+    # silently drop the (fully known) base entries over it.
+    merged = [dict(entry) for entry in base_params]
+    by_key = {tuple(entry.get(key, "") for key in merge_keys): entry for entry in merged}
+
+    for params, was_unresolvable in child_results[1:]:
+        if was_unresolvable:
+            continue
+        for entry in params:
+            target = by_key.get(tuple(entry.get(key, "") for key in merge_keys))
+            if target is not None:
+                target.update(entry)
+
+    return merged, findings
 
 
 def _list_local_directories(repo_root: Path) -> list[str]:

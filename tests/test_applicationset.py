@@ -373,6 +373,242 @@ spec:
     assert "selector" in findings[0].message
 
 
+def test_merge_generator_overrides_matching_base_entry(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/base-dev
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/override-dev
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    assert len(applications) == 1
+    assert applications[0].sources[0].path == "manifests/override-dev"
+
+
+def test_merge_generator_keeps_unmatched_base_entry_unchanged(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/dev
+                - server: prod
+                  path: manifests/prod
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/override-dev
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    paths = {app.name: app.sources[0].path for app in applications}
+    assert paths == {"app-dev": "manifests/override-dev", "app-prod": "manifests/prod"}
+
+
+def test_merge_generator_discards_non_matching_override_entry(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/dev
+          - list:
+              elements:
+                - server: staging
+                  path: manifests/staging
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    assert {app.name for app in applications} == {"app-dev"}
+
+
+def test_merge_generator_without_merge_keys_is_flagged_unresolvable(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        generators:
+          - list:
+              elements:
+                - server: dev
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: manifests/app
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert "mergeKeys" in findings[0].message
+
+
+def test_merge_generator_with_unresolvable_base_produces_no_applications(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - clusters: {}
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/dev
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert "clusters" in findings[0].message
+
+
+def test_merge_generator_with_unresolvable_override_still_uses_base(git_repo):
+    """The override generator being unresolvable doesn't hide the base
+    entries — they're fully known, only the (flagged) override is not."""
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - server
+        generators:
+          - list:
+              elements:
+                - server: dev
+                  path: manifests/dev
+          - clusters: {}
+  template:
+    metadata:
+      name: 'app-{{server}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert {app.name for app in applications} == {"app-dev"}
+    assert len(findings) == 1
+    assert "clusters" in findings[0].message
+
+
 def test_generated_application_is_checked_by_existing_rules(git_repo):
     """The whole point: a generated Application is a plain `Application`
     from the rules' point of view — no special-casing needed in

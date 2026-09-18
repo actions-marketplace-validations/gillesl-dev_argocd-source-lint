@@ -149,15 +149,28 @@ Supported, because they're resolvable from a local Git checkout alone
 - `matrix` — the cartesian product of its child generators' params
   (later keys override earlier ones on collision), as long as every
   child is itself resolvable.
+- `merge` — the base (first child) generator's entries, kept even
+  without a match in a later generator; a later generator only
+  overrides fields on an entry whose `mergeKeys` already match one from
+  the base, and its own non-matching entries are discarded, per the
+  upstream semantics (confirmed against the official docs, not
+  assumed). An unresolvable *base* means no keys to match against at
+  all, so the whole `merge` produces nothing (same reasoning as
+  `matrix`'s empty cross product); an unresolvable *later* generator
+  just contributes no override — the base entries are fully known
+  regardless, so they aren't hidden behind the one finding that already
+  flags the gap. A `merge` with no `mergeKeys` is flagged
+  `unresolvable-generator` outright: the upstream docs don't specify
+  matching behavior without one, so this tool doesn't guess at it.
 
 Not supported, each producing one `unresolvable-generator` finding
 (`info` by default) instead of guessing: `clusters`, `scmProvider`,
-`pullRequest`, `merge`, `plugin` (all require a live API/cluster call —
-the tool has none), and `goTemplate: true` (a different templating
-engine, Go templates, not the classic `{{key}}` substitution
-implemented here). A `git` generator whose `repoURL` doesn't match the
-repo being analyzed is equally out of scope, same principle as an
-external `Application` source.
+`pullRequest`, `plugin` (all require a live API/cluster call — the tool
+has none), and `goTemplate: true` (a different templating engine, Go
+templates, not the classic `{{key}}` substitution implemented here). A
+`git` generator whose `repoURL` doesn't match the repo being analyzed
+is equally out of scope, same principle as an external `Application`
+source.
 
 A generator's own `selector` (a label filter on its generated params,
 sibling of `list`/`git`/`matrix` in the same generator entry — including

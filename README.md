@@ -85,10 +85,10 @@ checkout. Each rule is listed in full in the [table above](#what-the-tool-does).
   generators to know which files in the overlay are actually referenced,
   the same signal as a plain directory source (see DESIGN.md); a remote
   resource reference is silently skipped, not guessed at.
-- `ApplicationSet` support covers `list`, `git` (`directories`/`files`)
-  and `matrix` generators — each generated `Application` goes through
-  the same rules as a plain one. `clusters`/`scmProvider`/`pullRequest`/
-  `merge`/`plugin` generators, `goTemplate: true` rendering, and a
+- `ApplicationSet` support covers `list`, `git` (`directories`/`files`),
+  `matrix` and `merge` generators — each generated `Application` goes
+  through the same rules as a plain one. `clusters`/`scmProvider`/
+  `pullRequest`/`plugin` generators, `goTemplate: true` rendering, and a
   generator's own `selector` (label filter) require live cluster/API
   access or logic this tool doesn't reimplement — out of scope v1,
   flagged `unresolvable-generator` rather than guessed at.
@@ -178,7 +178,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.8
+- uses: gillesl-dev/argocd-source-lint@v0.1.9
   with:
     path: .
 ```
@@ -187,7 +187,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.8
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.9
     inputs:
       scope: manifests/
 ```
@@ -197,7 +197,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.8
+    rev: v0.1.9
     hooks:
       - id: argocd-source-lint
 ```
