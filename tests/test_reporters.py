@@ -69,6 +69,7 @@ def test_sarif_structure_and_severity_mapping():
         "double-coverage",
         "revision-mismatch",
         "project-scope-violation",
+        "hpa-selfheal-conflict",
     }
 
     results = run["results"]

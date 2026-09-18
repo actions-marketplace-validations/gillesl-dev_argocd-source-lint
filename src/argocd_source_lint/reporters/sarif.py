@@ -25,6 +25,10 @@ _RULES_METADATA = {
         "An Application's source or destination is outside the sourceRepos/"
         "destinations scope of its own AppProject."
     ),
+    "hpa-selfheal-conflict": (
+        "A HorizontalPodAutoscaler and selfHeal both manage spec.replicas without "
+        "ignoreDifferences + RespectIgnoreDifferences -- ArgoCD resets the HPA on every sync."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

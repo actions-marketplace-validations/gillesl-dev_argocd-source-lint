@@ -70,6 +70,9 @@ class Application(BaseModel):
     # `Finding.line` (best-effort, None when unavailable).
     self_heal_line: int | None = None
     ignore_differences: list[IgnoreDiffRule] = Field(default_factory=list)
+    # `spec.syncPolicy.syncOptions` verbatim (e.g. "RespectIgnoreDifferences=true",
+    # "Validate=false") — used by `hpa-selfheal-conflict` only, so far.
+    sync_options: list[str] = Field(default_factory=list)
     source_file: Path
     # `spec.project` (defaults to "default", same as ArgoCD itself) and
     # `spec.destination` — used by `project-scope-violation` only.

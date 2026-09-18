@@ -351,6 +351,40 @@ declare it explicitly) or a named project genuinely managed elsewhere —
 flagged `info` in the second case, never silently treated as "no
 restriction" the way a missing `"default"` is.
 
+## `hpa-selfheal-conflict`
+
+A `HorizontalPodAutoscaler` and `selfHeal: true` both trying to own the
+same `Deployment`/`StatefulSet`'s `spec.replicas` is one of the most
+commonly reported ArgoCD footguns: the HPA scales the workload, ArgoCD's
+next self-heal reconciliation sees a live value that no longer matches
+Git and reverts it, the HPA scales it back — a permanent fight, fully
+silent from the Application's health/sync status (both stay green).
+
+The non-obvious part, confirmed against ArgoCD's own
+[diffing](https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/)/
+[sync-options](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/)
+docs rather than assumed: `ignoreDifferences` alone does **not** fix
+this. It only affects the *diff* used to compute `OutOfSync` — during an
+actual sync, the desired manifest is still applied as-is, replicas
+included, unless the `RespectIgnoreDifferences=true` sync option is also
+set. A repo with `ignoreDifferences` for the Deployment but missing that
+sync option looks correctly configured to a human reviewer and is still
+broken — which is exactly why this rule checks for *both*, and reports a
+distinct message when only one is present, rather than a single
+generic "misconfigured" finding.
+
+The HPA's target is resolved from its own `scaleTargetRef`
+(`kind`/`name`, and `apiVersion` when present to derive the Kubernetes
+API group for matching against `ignoreDifferences.group`) — never by
+searching for a matching Deployment manifest in the repo. This keeps the
+rule correct even when the target is rendered by a Helm chart this tool
+doesn't template, and avoids a false negative when the target simply
+isn't declared as a plain file at all. When `scaleTargetRef.apiVersion`
+is absent, the group is looked up in a small built-in map (`Deployment`/
+`StatefulSet`/`ReplicaSet` → `apps`, `ReplicationController` → core) —
+an unrecognized `kind` outside that map (e.g. a custom scalable CRD like
+Argo Rollouts' `Rollout`) is silently skipped rather than guessed at.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

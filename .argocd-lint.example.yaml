@@ -14,6 +14,7 @@ rules:
   double-coverage: error
   revision-mismatch: info
   project-scope-violation: error
+  hpa-selfheal-conflict: warning
 
 # Default: true (fail-closed). Only set to false knowingly if the team
 # accepts running on an incomplete shallow clone in CI.
