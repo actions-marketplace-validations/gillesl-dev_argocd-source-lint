@@ -70,6 +70,7 @@ def test_sarif_structure_and_severity_mapping():
         "revision-mismatch",
         "project-scope-violation",
         "hpa-selfheal-conflict",
+        "sync-validation-disabled",
     }
 
     results = run["results"]

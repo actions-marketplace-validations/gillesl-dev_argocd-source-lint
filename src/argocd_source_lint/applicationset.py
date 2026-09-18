@@ -250,6 +250,24 @@ def _resolve_matrix(
     severity: Severity,
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     children = matrix_generator.get("generators") or []
+
+    if len(children) > 2:
+        # ArgoCD's own matrix generator only supports combining exactly
+        # two child generators -- the controller reports an error on more
+        # (see DESIGN.md), it doesn't just behave unpredictably. Guessing
+        # at a 3+-way cartesian product here would report Applications
+        # ArgoCD itself would never actually generate.
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                severity,
+                "matrix generator has more than 2 child generators — ArgoCD only "
+                "supports combining exactly two and errors out on more, so this tool "
+                "doesn't guess at what it would generate either.",
+            )
+        ]
+
     findings: list[Finding] = []
     param_lists: list[list[dict[str, str]]] = []
 

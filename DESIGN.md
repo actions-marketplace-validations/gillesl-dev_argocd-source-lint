@@ -175,7 +175,14 @@ Supported, because they're resolvable from a local Git checkout alone
   pinned to some other revision.
 - `matrix` — the cartesian product of its child generators' params
   (later keys override earlier ones on collision), as long as every
-  child is itself resolvable.
+  child is itself resolvable. Capped at exactly 2 child generators,
+  matching ArgoCD's own real limit (confirmed against the official
+  docs): the upstream controller "reports an error on generation" for a
+  3rd, it doesn't just combine unpredictably. More than 2 is flagged
+  `unresolvable-generator` instead of computing a cartesian product
+  ArgoCD itself would never actually produce — an earlier version of
+  this tool had no such cap, which would have silently reported
+  Applications that don't exist.
 - `merge` — the base (first child) generator's entries, kept even
   without a match in a later generator; a later generator only
   overrides fields on an entry whose `mergeKeys` already match one from
@@ -384,6 +391,18 @@ is absent, the group is looked up in a small built-in map (`Deployment`/
 `StatefulSet`/`ReplicaSet` → `apps`, `ReplicationController` → core) —
 an unrecognized `kind` outside that map (e.g. a custom scalable CRD like
 Argo Rollouts' `Rollout`) is silently skipped rather than guessed at.
+
+## `sync-validation-disabled`
+
+`Validate=false` in `syncOptions` skips the Kubernetes API server's
+schema validation on every sync. It's a legitimate escape hatch for a
+CRD whose OpenAPI schema is itself broken upstream, but it's also a
+common way to make a validation error on a genuinely wrong manifest go
+away without fixing the manifest — and, once added, easy to forget
+about since nothing about the Application's health/sync status hints
+that validation is off. `info` by default (not `warning`/`error`): the
+flag is explicit in the manifest, not hidden the way this tool's other
+findings are, so it's a nudge to double-check, not a presumed mistake.
 
 ## Extension points
 

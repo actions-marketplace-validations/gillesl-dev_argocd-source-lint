@@ -52,6 +52,7 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
     self_heal = bool(automated.get("selfHeal", False))
     self_heal_line = _key_line(automated, "selfHeal") if self_heal else None
     sync_options = list(sync_policy.get("syncOptions") or [])
+    sync_options_line = _key_line(sync_policy, "syncOptions") if sync_options else None
 
     ignore_differences = [
         _build_ignore_diff_rule(raw) for raw in spec.get("ignoreDifferences", []) or []
@@ -72,6 +73,7 @@ def build_application(doc: dict[str, Any], manifest_path: Path, repo_root: Path)
         self_heal_line=self_heal_line,
         ignore_differences=ignore_differences,
         sync_options=sync_options,
+        sync_options_line=sync_options_line,
         source_file=source_file,
         project=spec.get("project") or "default",
         project_line=_key_line(spec, "project"),

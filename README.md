@@ -43,6 +43,7 @@ sensitive data involved.
 | `revision-mismatch` | info | a source's `targetRevision` differs from the checked-out revision — resolved against a snapshot of that revision, this is an FYI, not a correctness caveat |
 | `project-scope-violation` | error | an Application's source or destination is outside the `sourceRepos`/`destinations` scope of its own `AppProject` |
 | `hpa-selfheal-conflict` | warning | a `HorizontalPodAutoscaler` and `selfHeal: true` both managing `spec.replicas` without `ignoreDifferences` **and** the `RespectIgnoreDifferences` sync option — ArgoCD resets the HPA's replica count on every sync |
+| `sync-validation-disabled` | info | `Validate=false` sync option — an invalid manifest is applied anyway instead of blocking |
 
 Sample run, table output (the default):
 
@@ -70,7 +71,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -147,6 +148,7 @@ rules:
   revision-mismatch: info
   project-scope-violation: error
   hpa-selfheal-conflict: warning
+  sync-validation-disabled: info
 
 unverifiable_blocks_ci: true
 
@@ -185,7 +187,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.14
+- uses: gillesl-dev/argocd-source-lint@v0.1.15
   with:
     path: .
 ```
@@ -194,7 +196,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.14
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.15
     inputs:
       scope: manifests/
 ```
@@ -204,7 +206,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.14
+    rev: v0.1.15
     hooks:
       - id: argocd-source-lint
 ```

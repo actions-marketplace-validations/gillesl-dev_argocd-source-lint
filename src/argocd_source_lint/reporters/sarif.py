@@ -29,6 +29,10 @@ _RULES_METADATA = {
         "A HorizontalPodAutoscaler and selfHeal both manage spec.replicas without "
         "ignoreDifferences + RespectIgnoreDifferences -- ArgoCD resets the HPA on every sync."
     ),
+    "sync-validation-disabled": (
+        "Validate=false sync option skips schema validation -- an invalid manifest is "
+        "applied anyway instead of blocking."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

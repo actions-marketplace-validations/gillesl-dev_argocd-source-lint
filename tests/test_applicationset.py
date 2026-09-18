@@ -193,6 +193,50 @@ spec:
     assert {app.name for app in applications} == {"app-eu-dev", "app-eu-prod"}
 
 
+def test_matrix_generator_with_more_than_two_children_is_flagged_unresolvable(git_repo):
+    """ArgoCD's real matrix generator only supports exactly 2 child
+    generators and errors out on more (see DESIGN.md) -- this must not be
+    silently treated as a 3-way cartesian product."""
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/matrix-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: matrix-appset
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - region: eu
+          - list:
+              elements:
+                - env: dev
+          - list:
+              elements:
+                - tier: web
+  template:
+    metadata:
+      name: 'app-{{region}}-{{env}}-{{tier}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: manifests/app
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert findings[0].rule_id == "unresolvable-generator"
+    assert "more than 2 child generators" in findings[0].message
+
+
 def test_unresolvable_generator_produces_info_finding_and_no_applications(git_repo):
     repo_root = git_repo(
         {

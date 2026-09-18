@@ -29,6 +29,7 @@ from argocd_source_lint.rules.orphan_source import OrphanSourceRule
 from argocd_source_lint.rules.phantom_target import PhantomTargetRule
 from argocd_source_lint.rules.project_scope import ProjectScopeViolationRule
 from argocd_source_lint.rules.revision_mismatch import RevisionMismatchRule
+from argocd_source_lint.rules.sync_validation_disabled import SyncValidationDisabledRule
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -43,6 +44,7 @@ RULES: list[Rule] = [
     RevisionMismatchRule(),
     ProjectScopeViolationRule(),
     HpaSelfHealConflictRule(),
+    SyncValidationDisabledRule(),
 ]
 
 
