@@ -36,7 +36,7 @@ sensitive data involved.
 | --- | --- | --- |
 | `orphan-source` | error | a manifest present in the repo but not covered by any declared source |
 | `broken-values-ref` | error | a `$ref` in a Helm `valueFiles` entry with no matching source or file |
-| `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager...) with no `ignoreDifferences` while `selfHeal: true` is active |
+| `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi...) with no `ignoreDifferences` while `selfHeal: true` is active |
 | `phantom-target` | error | a `targetRevision`/`path` that resolves to nothing in the repo |
 | `unresolvable-generator` | info | an `ApplicationSet` generator this tool can't resolve from a local checkout alone (live cluster/API access, or `goTemplate: true` rendering) |
 | `double-coverage` | error | a file covered by more than one *different* Application at once, each syncing it from an independent loop |
@@ -152,7 +152,8 @@ exclude_paths:
   - manifests/legacy/**
 
 # Additional operator signatures, on top of the built-in pack
-# (CNPG, cert-manager) — never a replacement.
+# (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi) — never a
+# replacement.
 known_operators:
   - crd_trigger: my-operator.io/MyCRD
     name_from: metadata.name
@@ -182,7 +183,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.11
+- uses: gillesl-dev/argocd-source-lint@v0.1.12
   with:
     path: .
 ```
@@ -191,7 +192,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.11
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.12
     inputs:
       scope: manifests/
 ```
@@ -201,7 +202,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.11
+    rev: v0.1.12
     hooks:
       - id: argocd-source-lint
 ```

@@ -373,3 +373,102 @@ metadata:
 
     assert len(findings) == 1
     assert "my-widget-credentials" in findings[0].message
+
+
+def test_elastic_eck_cluster_flags_the_elastic_user_secret(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/logging-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: logging-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/logging
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/logging/es.yaml": """\
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: quickstart
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "missing-ignore-diff"
+    assert "quickstart-es-elastic-user" in findings[0].message
+
+
+def test_rabbitmq_cluster_flags_the_default_user_secret(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/mq-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mq-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/mq
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/mq/cluster.yaml": """\
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: sample
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 1
+    assert "sample-default-user" in findings[0].message
+
+
+def test_strimzi_kafka_user_flags_the_credentials_secret(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/kafka-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/kafka
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/kafka/user.yaml": """\
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: bob
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 1
+    assert findings[0].message.endswith(
+        "`Secret` `bob` — ArgoCD risks resetting this out-of-Git-managed field on every sync."
+    )

@@ -25,3 +25,26 @@
   expect_ignore_on:
     - kind: Secret
       name_pattern: "{name}"
+
+- crd_trigger: elasticsearch.k8s.elastic.co/Elasticsearch
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}-es-elastic-user"
+
+- crd_trigger: rabbitmq.com/RabbitmqCluster
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}-default-user"
+
+# Only generates a Secret for spec.authentication.type "scram-sha-512"
+# or "tls" -- an ACL-only or "tls-external" KafkaUser never gets one, so
+# this can false-positive on those. missing-ignore-diff is warning-only
+# and heuristic by nature (see rules/missing_ignore_diff.py) precisely
+# because a signature can't express that kind of conditional trigger.
+- crd_trigger: kafka.strimzi.io/KafkaUser
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}"
