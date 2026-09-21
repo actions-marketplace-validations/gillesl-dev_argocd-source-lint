@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from argocd_source_lint.git_context import (
+    is_git_available,
     is_local_repo_url,
     normalize_repo_url,
     revision_matches_checkout,
 )
+
+
+def test_is_git_available_true_when_git_is_on_path():
+    assert is_git_available() is True
+
+
+def test_is_git_available_false_when_git_is_missing():
+    with patch("shutil.which", return_value=None):
+        assert is_git_available() is False
+
 
 EQUIVALENT_FORMS = [
     "https://gitlab.example.com/group/example-repo.git",

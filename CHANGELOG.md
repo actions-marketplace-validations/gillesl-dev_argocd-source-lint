@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.25] - 2026-09-21
+
+### Fixed
+
+- A missing `git` binary silently degraded every result into false
+  `orphan-source`/`double-coverage` positives instead of a clear error:
+  `get_origin_url` was the only call site that handled it, by returning
+  `None` — the exact same value it returns for "no `origin` remote
+  configured," which every rule already (correctly, for that case)
+  treats as "nothing here is local." Reproduced against
+  `python:3.11-slim`, the base image `templates/lint.yml` itself
+  recommends, which doesn't ship `git`. Fixed on both ends: the CLI now
+  checks `git` is on PATH at startup and exits with a clear error
+  instead of degrading, and `templates/lint.yml` installs `git` in
+  `before_script`.
+
 ## [0.1.24] - 2026-09-21
 
 ### Fixed

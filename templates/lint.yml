@@ -19,6 +19,10 @@ argocd-source-lint:
   stage: $[[ inputs.stage ]]
   image: python:3.11-slim
   before_script:
+    # python:3.11-slim doesn't ship git -- every rule here resolves a
+    # source through it, and without it the tool degrades into false
+    # positives instead of erroring (see DESIGN.md).
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git
     - pip install --disable-pip-version-check argocd-source-lint
   script:
     - |

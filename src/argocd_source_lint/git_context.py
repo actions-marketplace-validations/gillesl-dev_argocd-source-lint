@@ -14,6 +14,22 @@ from argocd_source_lint.models import Application, Source
 _SCP_LIKE_RE = re.compile(r"^(?:[^@/]+@)?([^:/]+):(.+)$")
 
 
+def is_git_available() -> bool:
+    """Every rule that resolves a source ultimately shells out to `git`
+    (revision lookups, tree listings, the `targetRevision`-drift
+    snapshot) -- but `get_origin_url` is the only one of those call
+    sites that catches a missing binary, and it does so by returning
+    `None`, the exact same value it returns for a repo with no `origin`
+    remote configured at all. Every rule already treats that `None` as
+    "nothing here is local" -- correct for a missing remote, silently
+    wrong for a missing `git`: every source floods `orphan-source`/
+    `double-coverage` as a false "not covered" instead of a clear error
+    (confirmed against `python:3.11-slim`, the base image this repo's
+    own `templates/lint.yml` recommends, which doesn't ship `git`).
+    Checked once, loudly, at startup instead."""
+    return shutil.which("git") is not None
+
+
 def get_origin_url(repo_root: Path) -> str | None:
     try:
         result = subprocess.run(

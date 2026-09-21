@@ -24,6 +24,27 @@ same Application is external.
 Verifying external-repo sources for real (cloning them, caching by
 `repoURL` + `targetRevision`) is a natural v2, not a hidden limitation.
 
+## Requiring `git` on PATH, loudly
+
+Every rule that resolves a source ultimately shells out to `git`
+(`git_context.py`: revision lookups, tree listings, the
+`targetRevision`-drift snapshot) — but until this was caught, only
+`get_origin_url` handled a missing binary at all, and it did so by
+returning `None`, the exact same value it returns for a repo with no
+`origin` remote configured. Every rule already treats that `None` as
+"nothing here is local," which is correct for a missing remote and
+silently wrong for a missing `git`: every source gets misclassified as
+external, `orphan-source`/`double-coverage` flood with false "not
+covered" errors on files that *are* covered, instead of a clear error
+pointing at the actual cause. Reproduced against `python:3.11-slim` —
+the base image this repo's own `templates/lint.yml` recommended, which
+doesn't ship `git` (fixed there too, alongside this).
+
+`cli.py` now checks `git_context.is_git_available()` once, at startup,
+before anything else runs, and exits loudly (code `2`, same as the
+"path not found" case) instead of letting the degraded behavior above
+happen at all.
+
 ## `directory.recurse`/`include`/`exclude` semantics
 
 `orphan-source` and `missing-ignore-diff` both need to know exactly which

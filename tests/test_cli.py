@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from typer.testing import CliRunner
@@ -8,6 +9,19 @@ from typer.testing import CliRunner
 from argocd_source_lint.cli import app
 
 runner = CliRunner()
+
+
+def test_missing_git_exits_2_with_a_clear_error_instead_of_degrading(fixture_repo):
+    """Without this check, a missing `git` silently turns into false
+    `orphan-source` positives on every covered file instead of a clear
+    error (see `git_context.is_git_available`)."""
+    repo_root = fixture_repo("good_repo")
+
+    with patch("argocd_source_lint.cli.is_git_available", return_value=False):
+        result = runner.invoke(app, [str(repo_root)])
+
+    assert result.exit_code == 2
+    assert "git" in result.stdout.lower()
 
 
 def test_version_flag_prints_version_and_exits_0():

@@ -14,7 +14,7 @@ from argocd_source_lint.baseline import (
     stale_baseline_entries,
     write_baseline,
 )
-from argocd_source_lint.git_context import get_origin_url
+from argocd_source_lint.git_context import get_origin_url, is_git_available
 from argocd_source_lint.loader import RawManifestDiscovery
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy, load_policy
@@ -101,6 +101,16 @@ def lint(
     repo_root = path.resolve()
     if not repo_root.is_dir():
         console.print(f"[red]Path not found: {repo_root}[/red]")
+        raise typer.Exit(code=2)
+
+    if not is_git_available():
+        console.print(
+            "[red]`git` was not found on PATH.[/red] Every rule here resolves a "
+            "source through it (revision lookups, tree listings) -- without it, "
+            "results silently degrade into false positives instead of erroring, "
+            "rather than the other way around. Install it (e.g. `apt-get install "
+            "-y git` in a minimal container image) and try again."
+        )
         raise typer.Exit(code=2)
 
     policy = load_policy(repo_root)
