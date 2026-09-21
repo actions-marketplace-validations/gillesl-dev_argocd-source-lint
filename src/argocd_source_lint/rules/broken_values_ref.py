@@ -7,7 +7,7 @@ from argocd_source_lint.git_context import (
     is_revision_resolvable,
     list_tree_paths,
 )
-from argocd_source_lint.models import Application, Finding, Severity
+from argocd_source_lint.models import Application, Finding, Severity, Source
 from argocd_source_lint.policy import Policy
 from argocd_source_lint.rules.base import Rule
 
@@ -34,15 +34,28 @@ class BrokenValuesRefRule(Rule):
 
             for source in app.sources:
                 for idx, entry in enumerate(source.helm_value_files):
-                    ref_name, rel_path = _parse_ref_entry(entry)
-                    if ref_name is None:
-                        continue  # not a `$ref/...` entry: out of scope for this rule
-
                     entry_line = (
                         source.helm_value_files_lines[idx]
                         if idx < len(source.helm_value_files_lines)
                         else None
                     )
+
+                    ref_name, rel_path = _parse_ref_entry(entry)
+                    if ref_name is None:
+                        findings.extend(
+                            _check_plain_entry(
+                                app,
+                                source,
+                                entry,
+                                entry_line,
+                                repo_root,
+                                local_origin,
+                                severity,
+                                revision_resolvable,
+                                tree_paths,
+                            )
+                        )
+                        continue
 
                     ref_source = ref_sources.get(ref_name)
                     if ref_source is None:
@@ -108,6 +121,59 @@ def _tree_paths(repo_root: Path, revision: str, cache: dict[str, set[str]]) -> s
     if revision not in cache:
         cache[revision] = set(list_tree_paths(repo_root, revision, "."))
     return cache[revision]
+
+
+def _check_plain_entry(
+    app: Application,
+    source: Source,
+    entry: str,
+    entry_line: int | None,
+    repo_root: Path,
+    local_origin: str | None,
+    severity: Severity,
+    revision_resolvable: dict[str, bool],
+    tree_paths: dict[str, set[str]],
+) -> list[Finding]:
+    """A plain (non-`$ref`) `helm.valueFiles` entry, resolved relative to
+    this source's own `path` -- the common case, and a real gap
+    (confirmed by argoproj/argo-cd#4558, "New Applications with
+    misconfiguration show up as Healthy"): a missing values file fails
+    Helm template generation, but the Application can converge to a
+    misleadingly healthy status instead of a clear sync error."""
+    if source.helm_ignore_missing_value_files:
+        return []  # ArgoCD itself silently tolerates a missing file here
+    if not source.path or not is_local_repo_url(source.repo_url, local_origin):
+        return []  # no local directory to resolve a plain path against
+
+    revision = source.target_revision
+    if revision not in revision_resolvable:
+        revision_resolvable[revision] = is_revision_resolvable(repo_root, revision)
+    if not revision_resolvable[revision]:
+        return [
+            _finding(
+                app,
+                Severity.UNVERIFIABLE,
+                f"`{entry}`: revision `{revision}` missing from the local checkout — "
+                "unable to verify the file. Add `fetch-depth: 0` or fetch the branch "
+                "in question in CI.",
+                line=entry_line,
+            )
+        ]
+
+    full_path = f"{source.path.rstrip('/')}/{entry}"
+    if full_path in _tree_paths(repo_root, revision, tree_paths):
+        return []
+
+    return [
+        _finding(
+            app,
+            severity,
+            f"`{entry}` (Helm valueFiles): file not found at `{full_path}` on revision "
+            f"`{revision}` — Helm template generation fails, and ArgoCD can converge to "
+            "a misleadingly healthy status instead of a clear sync error.",
+            line=entry_line,
+        )
+    ]
 
 
 def _parse_ref_entry(entry: str) -> tuple[str | None, str]:

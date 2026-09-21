@@ -34,6 +34,10 @@ class Source(BaseModel):
     # (None when the source YAML wasn't round-trip parsed, e.g. in tests
     # that build a `Source` directly).
     helm_value_files_lines: list[int | None] = Field(default_factory=list)
+    # spec.source(s)[].helm.ignoreMissingValueFiles -- when true, ArgoCD
+    # itself silently skips any missing valueFiles entry rather than
+    # failing, so broken-values-ref has nothing to check for this source.
+    helm_ignore_missing_value_files: bool = False
     # `spec.source(s)[].directory` (only relevant when `path` is a directory
     # of raw manifests, not a Helm chart or a Kustomize overlay).
     # Defaults aligned with ArgoCD: recurse=false, no filter.

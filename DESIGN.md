@@ -541,6 +541,35 @@ not obviously wrong unless you're specifically checking ordering — but
 the check itself is fully objective (does this parse as an integer?),
 not a guess.
 
+## `broken-values-ref`'s plain `valueFiles` check
+
+Found by tracing a real, confirmed community report
+([argoproj/argo-cd#4558](https://github.com/argoproj/argo-cd/issues/4558),
+"New Applications with misconfiguration show up as Healthy") back to a
+gap in this tool rather than a new rule: a plain (non-`$ref`)
+`helm.valueFiles` entry — the common case, not the exception — was
+never checked for existence at all. Only cross-source `$ref/path.yaml`
+entries were. A missing values file fails Helm template generation on
+ArgoCD's side, and the Application can converge to a misleadingly
+healthy status instead of a clear sync error — exactly the failure
+class this tool exists for, previously invisible for the *more* common
+addressing scheme.
+
+A plain entry resolves relative to its own source's `path` (the chart
+root for a `path:`-based source), checked with the same revision-aware
+`git ls-tree` machinery already used for `$ref` entries — no new
+mechanism, same `RULE_ID`, following the precedent set by
+`unknown-sync-option` covering both the Application-level and
+per-resource forms of the same underlying concern rather than
+splitting into two rule IDs. Two deliberate exclusions, both to avoid
+a false positive on a legitimately unverifiable or intentionally
+tolerant case: a source with no local `path` (nothing to resolve a
+relative entry against — a pure Helm registry/OCI chart) is skipped,
+and `helm.ignoreMissingValueFiles: true` disables the check entirely
+for that source, since ArgoCD itself then silently tolerates a missing
+file by design (confirmed against the official docs) — nothing left to
+flag.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

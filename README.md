@@ -35,7 +35,7 @@ sensitive data involved.
 | Rule | Default severity | Detects |
 | --- | --- | --- |
 | `orphan-source` | error | a manifest present in the repo but not covered by any declared source |
-| `broken-values-ref` | error | a `$ref` in a Helm `valueFiles` entry with no matching source or file |
+| `broken-values-ref` | error | a Helm `valueFiles` entry (plain, or `$ref`) pointing to a file that doesn't exist |
 | `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi, Zalando Postgres Operator...) with no `ignoreDifferences` while `selfHeal: true` is active |
 | `phantom-target` | error | a `targetRevision`/`path` that resolves to nothing in the repo |
 | `unresolvable-generator` | info | an `ApplicationSet` generator this tool can't resolve from a local checkout alone (live cluster/API access, or `goTemplate: true` rendering) |
@@ -198,7 +198,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.20
+- uses: gillesl-dev/argocd-source-lint@v0.1.21
   with:
     path: .
 ```
@@ -213,7 +213,7 @@ group's path:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.20
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.21
     inputs:
       scope: manifests/
 ```
@@ -223,7 +223,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.20
+    rev: v0.1.21
     hooks:
       - id: argocd-source-lint
 ```

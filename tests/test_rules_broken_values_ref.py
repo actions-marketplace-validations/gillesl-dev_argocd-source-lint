@@ -164,9 +164,39 @@ def test_rule_severity_is_configurable_via_policy(fixture_repo):
     assert all(f.severity == Severity.WARNING for f in findings)
 
 
-def test_entries_without_ref_prefix_are_ignored(git_repo):
-    """A plain `valueFiles` entry (relative to its own source's `path`, not
-    a `$ref/...`) is out of scope for this rule."""
+def test_plain_entry_existing_file_produces_no_finding(git_repo):
+    """A plain `valueFiles` entry (no `$ref/...`) is resolved relative to
+    its own source's `path` -- the common case, not a `$ref`-only rule."""
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/demo-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/demo-app
+    helm:
+      valueFiles:
+        - values.yaml
+""",
+            "manifests/demo-app/values.yaml": "key: value\n",
+        }
+    )
+
+    findings = _run_broken_values_ref(repo_root)
+
+    assert findings == []
+
+
+def test_plain_entry_missing_file_is_flagged(git_repo):
+    """Real gap fixed here (see argoproj/argo-cd#4558, "New Applications
+    with misconfiguration show up as Healthy"): a plain valueFiles entry
+    pointing to a nonexistent file used to be silently ignored by this
+    rule -- it's the common case, not the exception."""
     repo_root = git_repo(
         {
             "bootstrap/argocd-apps/demo-app.yaml": """\
@@ -190,4 +220,90 @@ spec:
 
     findings = _run_broken_values_ref(repo_root)
 
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.rule_id == "broken-values-ref"
+    assert finding.severity == Severity.ERROR
+    assert "does-not-exist-either.yaml" in finding.message
+    assert "manifests/demo-app/does-not-exist-either.yaml" in finding.message
+
+
+def test_plain_entry_with_ignore_missing_value_files_is_not_flagged(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/demo-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/demo-app
+    helm:
+      ignoreMissingValueFiles: true
+      valueFiles:
+        - does-not-exist.yaml
+""",
+            "manifests/demo-app/.gitkeep": "",
+        }
+    )
+
+    findings = _run_broken_values_ref(repo_root)
+
     assert findings == []
+
+
+def test_plain_entry_on_external_source_is_not_checked(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/demo-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+spec:
+  source:
+    repoURL: https://example.invalid/some-other-repo.git
+    targetRevision: HEAD
+    path: manifests/demo-app
+    helm:
+      valueFiles:
+        - does-not-exist.yaml
+""",
+        }
+    )
+
+    findings = _run_broken_values_ref(repo_root)
+
+    assert findings == []
+
+
+def test_plain_entry_unresolvable_revision_is_unverifiable(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/demo-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: never-fetched-branch
+    path: manifests/demo-app
+    helm:
+      valueFiles:
+        - values.yaml
+""",
+        }
+    )
+
+    findings = _run_broken_values_ref(repo_root)
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.severity == Severity.UNVERIFIABLE
+    assert "never-fetched-branch" in finding.message
+    assert "fetch-depth" in finding.message

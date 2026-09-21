@@ -97,6 +97,7 @@ def build_source(raw: dict[str, Any]) -> Source:
         ref=raw.get("ref"),
         helm_value_files=list(value_files),
         helm_value_files_lines=_item_lines(value_files),
+        helm_ignore_missing_value_files=bool(helm.get("ignoreMissingValueFiles", False)),
         directory_recurse=bool(directory.get("recurse", False)),
         directory_include=directory.get("include"),
         directory_exclude=directory.get("exclude"),
