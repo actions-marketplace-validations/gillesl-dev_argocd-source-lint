@@ -156,6 +156,90 @@ spec:
     assert applications[0].sources[0].path == "manifests/prod"
 
 
+def test_git_directories_generator_honors_a_pinned_revision(git_repo, git_tag, git_commit):
+    """The generator's own `revision` is independent of the template's
+    `targetRevision` (confirmed against the upstream Git generator docs)
+    -- discovering from the checked-out working tree regardless of it
+    would silently generate Applications for today's directory
+    structure instead of the pinned one's."""
+    repo_root = git_repo(
+        {
+            "apps/old/deployment.yaml": "kind: Deployment\n",
+            "bootstrap/appsets/dirs-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dirs-appset
+spec:
+  generators:
+    - git:
+        repoURL: https://example.invalid/repo.git
+        revision: v1.0
+        directories:
+          - path: apps/*
+  template:
+    metadata:
+      name: '{{path.basename}}-app'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+    git_tag(repo_root, "v1.0")
+    # HEAD now has `apps/new`, not `apps/old` -- if the generator ignored
+    # its own pinned `revision` and read the working tree, it would
+    # generate `new-app` instead of the (correct) `old-app`.
+    git_commit(
+        repo_root,
+        {"apps/old/deployment.yaml": None, "apps/new/deployment.yaml": "kind: Deployment\n"},
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    assert {app.name for app in applications} == {"old-app"}
+
+
+def test_git_generator_with_unresolvable_revision_is_flagged_unverifiable(git_repo):
+    repo_root = git_repo(
+        {
+            "apps/foo/deployment.yaml": "kind: Deployment\n",
+            "bootstrap/appsets/dirs-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dirs-appset
+spec:
+  generators:
+    - git:
+        repoURL: https://example.invalid/repo.git
+        revision: does-not-exist-anywhere
+        directories:
+          - path: apps/*
+  template:
+    metadata:
+      name: '{{path.basename}}-app'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert findings[0].rule_id == "unresolvable-generator"
+    assert findings[0].severity == Severity.UNVERIFIABLE
+    assert "does-not-exist-anywhere" in findings[0].message
+
+
 def test_matrix_generator_combines_two_child_generators(git_repo):
     repo_root = git_repo(
         {

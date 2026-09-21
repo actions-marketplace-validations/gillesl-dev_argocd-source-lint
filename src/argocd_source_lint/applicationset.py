@@ -8,7 +8,11 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
-from argocd_source_lint.git_context import is_local_repo_url
+from argocd_source_lint.git_context import (
+    is_local_repo_url,
+    materialize_revision,
+    revision_matches_checkout,
+)
 from argocd_source_lint.globs import match_glob
 from argocd_source_lint.loader import build_application
 from argocd_source_lint.models import Application, Finding, Severity
@@ -194,13 +198,49 @@ def _resolve_git(
             )
         ]
 
-    # Reads the local working tree directly (not `git show <revision>`):
-    # correct whenever `revision` matches what's checked out (`HEAD`, the
-    # overwhelming majority of real-world usage) — a deliberate v1
-    # simplification, not a silent approximation (see DESIGN.md).
+    # The generator's own `revision` is independent of any generated
+    # Application's `targetRevision` (confirmed against the upstream Git
+    # generator docs) -- discovering `directories`/`files` from the
+    # checked-out working tree regardless was a real, silent-wrong-result
+    # gap: a `revision` pinned away from HEAD would enumerate today's
+    # directory structure, not the pinned one. Same snapshot mechanism as
+    # `coverage._resolved_source_root` (DESIGN.md "targetRevision drift"),
+    # reused here rather than a second implementation.
+    revision = git_generator.get("revision") or "HEAD"
+    matches_checkout = revision_matches_checkout(repo_root, revision)
+    if matches_checkout is None:
+        # `is None`, not `is False` -- a revision that doesn't resolve at
+        # all must never fall through as "matches HEAD" by default.
+        return [], [
+            _finding(
+                appset_name,
+                source_file,
+                Severity.UNVERIFIABLE,
+                f"git generator's revision `{revision}` missing from the local "
+                "checkout — unable to tell which directories/files it would "
+                "discover. Add `fetch-depth: 0` or fetch the branch in question "
+                "in CI.",
+            )
+        ]
+
+    base_root = repo_root
+    if matches_checkout is False:
+        snapshot_root = materialize_revision(repo_root, revision)
+        if snapshot_root is None:
+            return [], [
+                _finding(
+                    appset_name,
+                    source_file,
+                    Severity.UNVERIFIABLE,
+                    f"git generator's revision `{revision}` could not be extracted "
+                    "from the local checkout.",
+                )
+            ]
+        base_root = snapshot_root
+
     param_sets: list[dict[str, str]] = []
-    param_sets.extend(_resolve_git_directories(repo_root, git_generator.get("directories") or []))
-    param_sets.extend(_resolve_git_files(repo_root, git_generator.get("files") or []))
+    param_sets.extend(_resolve_git_directories(base_root, git_generator.get("directories") or []))
+    param_sets.extend(_resolve_git_files(base_root, git_generator.get("files") or []))
     return param_sets, []
 
 

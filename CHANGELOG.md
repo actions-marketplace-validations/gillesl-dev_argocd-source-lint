@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.24] - 2026-09-21
+
+### Fixed
+
+- The ApplicationSet `git` generator's own `revision` field
+  (`directories`/`files`, independent of any generated Application's
+  `targetRevision`) was never read at all — directory/file discovery
+  always used the checked-out working tree. A `revision` pinned away
+  from HEAD would silently generate Applications from today's directory
+  structure instead of the pinned one's, with no finding raised at all
+  — worse than the other `unresolvable-generator` cases, which are at
+  least flagged. Now resolved against a snapshot of that revision, the
+  same mechanism already used for a source's own `targetRevision`
+  (`git_context.materialize_revision`, moved there from `coverage.py`
+  so both call sites share it). An unresolvable revision is reported
+  `unverifiable`, same as `phantom-target`/`broken-values-ref`'s
+  shallow-clone case.
+
 ## [0.1.23] - 2026-09-21
 
 ### Fixed

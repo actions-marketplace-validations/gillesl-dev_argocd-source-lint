@@ -302,7 +302,7 @@ the tool itself.
 
 The fix (`coverage._resolved_source_root`): for each local source,
 `git_context.revision_matches_checkout` compares `targetRevision` against
-what's actually checked out. When it differs, `coverage._materialized_repo_root`
+what's actually checked out. When it differs, `git_context.materialize_revision`
 extracts a full snapshot of the repo *as it existed at that revision*
 (`git archive <revision>`, piped straight into a throwaway directory via
 Python's `tarfile` — no shell `tar` dependency) and every existing
@@ -314,8 +314,8 @@ with it by hand. The snapshot is a full extraction, not just the
 source's own `path`, deliberately: a Kustomize `resources:` entry
 reaching outside that `path` (a shared base one level up, say) must
 still resolve, exactly as it would against the real working tree.
-Extracted once per distinct revision and reused across every source
-pinned to it within the run; cleaned up at process exit.
+Extracted once per distinct revision and reused across every caller
+pinned to it within the run (see below); cleaned up at process exit.
 
 Two different things came out of one underlying computation, because two
 different rules need two different things from it:
@@ -344,6 +344,25 @@ not a correctness caveat, since the rules above already resolved it
 correctly: it's there so a human reading the report notices that an
 Application is pinned away from HEAD at all, which is easy to miss
 otherwise.
+
+The ApplicationSet `git` generator's own `revision` (`directories`/
+`files`, independent of any generated Application's `targetRevision` —
+confirmed against the upstream Git generator docs) had the exact same
+gap until it was pointed out in review: `applicationset._resolve_git`
+read the checked-out working tree unconditionally, `revision` never
+even read. Invisible on the common case (`revision: HEAD`), but a
+`revision` pinned elsewhere would silently discover today's directory
+structure instead of the pinned one's — a *worse* failure mode than
+the other `unresolvable-generator` cases, since nothing was flagged at
+all. Fixed by reusing `git_context.materialize_revision` here too, the
+one gotcha being that `revision_matches_checkout`'s three-way return
+must be handled as three branches, not two: `is False` for "differs, go
+resolve a snapshot" cannot also stand in for "doesn't resolve at all"
+(`None`) — `None is False` is `False` in Python, so a naive `if ... is
+False` skips straight past an unresolvable revision and silently
+treats it as matching HEAD. `None` is checked first and reported
+`unverifiable`, same severity `phantom-target`/`broken-values-ref`
+already use for exactly this shallow-clone case.
 
 ## `project-scope-violation`
 

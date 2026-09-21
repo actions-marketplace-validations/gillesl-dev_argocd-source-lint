@@ -13,11 +13,11 @@ RULE_ID = "revision-mismatch"
 class RevisionMismatchRule(Rule):
     """orphan-source, missing-ignore-diff and double-coverage resolve a
     local source's files against a snapshot of its own `targetRevision`
-    when that differs from what's checked out (see `coverage.py`'s
-    `_materialized_repo_root`, DESIGN.md "targetRevision drift") — so
-    their result stays correct either way. This is purely an FYI that a
-    source is pinned away from HEAD, for a human reading the report, not
-    a correctness caveat."""
+    when that differs from what's checked out (see
+    `git_context.materialize_revision`, DESIGN.md "targetRevision drift")
+    — so their result stays correct either way. This is purely an FYI
+    that a source is pinned away from HEAD, for a human reading the
+    report, not a correctness caveat."""
 
     rule_id = RULE_ID
 

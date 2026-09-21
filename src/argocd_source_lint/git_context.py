@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import re
+import shutil
 import subprocess
+import tarfile
+import tempfile
+from io import BytesIO
 from pathlib import Path
 
 from argocd_source_lint.models import Application, Source
@@ -114,6 +119,46 @@ def revision_matches_checkout(repo_root: Path, revision: str) -> bool | None:
         return None
     head = _resolve_commit(repo_root, "HEAD")
     return head is not None and head == target
+
+
+_REVISION_SNAPSHOT_CACHE: dict[tuple[Path, str], Path | None] = {}
+
+
+def materialize_revision(repo_root: Path, revision: str) -> Path | None:
+    """A full extraction of `repo_root` as it existed at `revision` into a
+    throwaway directory, so filesystem-based logic elsewhere (coverage
+    computation, the ApplicationSet `git` generator's own `directories`/
+    `files` discovery) can be reused completely unchanged against it —
+    including cross-directory Kustomize references, which a partial
+    extraction of just one source's own `path` would silently fail to
+    resolve. Reused across every caller pinned to the same revision
+    within this run; cleaned up at process exit. `None` if `revision`
+    doesn't produce a tree (shouldn't happen — callers only reach this
+    after `revision_matches_checkout` confirmed it resolves, or
+    `is_revision_resolvable` directly)."""
+    cache_key = (repo_root, revision)
+    if cache_key in _REVISION_SNAPSHOT_CACHE:
+        return _REVISION_SNAPSHOT_CACHE[cache_key]
+
+    result = subprocess.run(
+        ["git", "archive", revision],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    snapshot_root: Path | None = None
+    if result.returncode == 0 and result.stdout:
+        # `.resolve()`: on Windows, `tempfile.mkdtemp()` can return a
+        # short (8.3) path form that a file's own `.resolve()` inside it
+        # never reproduces, breaking `relative_to()` below on a textual
+        # mismatch despite being the same directory.
+        tmp_root = Path(tempfile.mkdtemp(prefix="argocd-source-lint-")).resolve()
+        atexit.register(shutil.rmtree, tmp_root, ignore_errors=True)
+        with tarfile.open(fileobj=BytesIO(result.stdout)) as tar:
+            tar.extractall(tmp_root, filter="data")
+        snapshot_root = tmp_root
+
+    _REVISION_SNAPSHOT_CACHE[cache_key] = snapshot_root
+    return snapshot_root
 
 
 def list_tree_paths(repo_root: Path, revision: str, pathspec: str) -> list[str]:
