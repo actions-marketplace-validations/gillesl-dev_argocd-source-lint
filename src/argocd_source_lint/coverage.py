@@ -245,10 +245,13 @@ def _resolve_local_reference(directory: Path, entry: str, seen: set[Path]) -> se
 
 def match_directory_patterns(relative_posix: str, pattern: str) -> bool:
     """ArgoCD's `include`/`exclude`: a single glob pattern, or several
-    comma-separated ones wrapped in braces (`{a,b}`)."""
+    comma-separated ones wrapped in braces (`{a,b}`). `fnmatchcase` (not
+    `fnmatch`, which lowercases both sides on Windows) so a repo checked
+    out on a case-sensitive CI runner and linted locally on Windows agree
+    on the result, matching ArgoCD's own case-sensitive Go glob."""
     pattern = pattern.strip()
     if pattern.startswith("{") and pattern.endswith("}"):
         alternatives = pattern[1:-1].split(",")
     else:
         alternatives = [pattern]
-    return any(fnmatch.fnmatch(relative_posix, alt.strip()) for alt in alternatives)
+    return any(fnmatch.fnmatchcase(relative_posix, alt.strip()) for alt in alternatives)

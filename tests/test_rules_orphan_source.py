@@ -125,6 +125,22 @@ def test_exclude_paths_suppresses_orphan_finding(fixture_repo):
     assert findings == []
 
 
+def test_exclude_paths_is_case_sensitive(fixture_repo):
+    """A repo checked out on Linux CI is case-sensitive; `exclude_paths`
+    must behave the same on Windows, not silently over-match via
+    `fnmatch`'s case-folding (see coverage.py/orphan_source.py)."""
+    repo_root = fixture_repo("bad_orphan_source")
+    (repo_root / ".argocd-lint.yaml").write_text(
+        "scan_roots:\n  - manifests/\nexclude_paths:\n  - manifests/ORPHANED/**\n",
+        encoding="utf-8",
+    )
+
+    findings = _run_orphan_source(repo_root)
+
+    assert len(findings) == 1
+    assert "manifests/orphaned" in findings[0].file.as_posix()
+
+
 def test_helm_ref_value_file_is_treated_as_covered(git_repo):
     """Very common real-world pattern: external Helm chart + values.yaml
     referenced via $values, with no local `path` source at all."""

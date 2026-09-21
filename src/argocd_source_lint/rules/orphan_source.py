@@ -89,8 +89,12 @@ def _referenced_value_file_paths(app: Application, local_origin: str | None) -> 
 
 
 def _is_excluded(relative: Path, exclude_paths: list[str]) -> bool:
+    # `fnmatchcase` (not `fnmatch`, which lowercases both sides on
+    # Windows): `.argocd-lint.yaml` is committed and run on a
+    # case-sensitive CI runner as much as locally, so `exclude_paths`
+    # must match the same files regardless of the host OS.
     posix_path = relative.as_posix()
-    return any(fnmatch.fnmatch(posix_path, pattern) for pattern in exclude_paths)
+    return any(fnmatch.fnmatchcase(posix_path, pattern) for pattern in exclude_paths)
 
 
 def _has_ignore_marker(path: Path) -> bool:

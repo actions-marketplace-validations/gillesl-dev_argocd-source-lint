@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from argocd_source_lint.coverage import covered_files_for_kustomize_dir
+from argocd_source_lint.coverage import covered_files_for_kustomize_dir, match_directory_patterns
 
 
 def _write(root: Path, relative: str, content: str = "kind: Deployment\n") -> Path:
@@ -142,3 +142,16 @@ def test_non_kustomize_directory_returns_empty_set(tmp_path):
     _write(tmp_path, "deployment.yaml")
 
     assert covered_files_for_kustomize_dir(tmp_path) == set()
+
+
+def test_match_directory_patterns_is_case_sensitive():
+    """ArgoCD's `directory.include`/`exclude` is matched by Go's
+    `filepath.Match`, which never folds case on any platform — this must
+    stay true regardless of the host OS running the linter, not silently
+    over-match on Windows via `fnmatch`'s case-folding."""
+    assert match_directory_patterns("deploy.yaml", "*.yaml") is True
+    assert match_directory_patterns("Deploy.YAML", "*.yaml") is False
+
+
+def test_match_directory_patterns_brace_alternatives_still_match():
+    assert match_directory_patterns("app/deployment.yaml", "{*.yaml,app/*.yaml}") is True

@@ -198,7 +198,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.21
+- uses: gillesl-dev/argocd-source-lint@v0.1.22
   with:
     path: .
 ```
@@ -213,7 +213,7 @@ group's path:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.21
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.22
     inputs:
       scope: manifests/
 ```
@@ -223,7 +223,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.21
+    rev: v0.1.22
     hooks:
       - id: argocd-source-lint
 ```

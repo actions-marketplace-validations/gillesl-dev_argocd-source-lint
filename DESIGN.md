@@ -36,7 +36,13 @@ than assumed:
   explicitly.
 - `directory.include`/`exclude` is a glob pattern, or several comma
   separated ones wrapped in braces (`{a,b}`), matched against the path
-  relative to the source's `path`.
+  relative to the source's `path`. Matched with `fnmatch.fnmatchcase`,
+  not the case-insensitive-on-Windows `fnmatch.fnmatch`: ArgoCD's own Go
+  `filepath.Match` never folds case on any platform, so a repo checked
+  out on a case-sensitive CI runner and linted locally on Windows must
+  agree on the result — same reasoning as `project-scope-violation`'s
+  `destination` matching below. `.argocd-lint.yaml`'s own `exclude_paths`
+  (`orphan-source`) is matched the same way, for the same reason.
 - A `path` containing a `Chart.yaml` is treated as opaque and considered
   fully covered rather than partially interpreted — rendering a Helm
   chart's templates is out of scope for v1 (delegate to `helm template`/a
