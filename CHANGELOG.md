@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [Unreleased]
+
+### Fixed
+
+- README's "pending real PyPI" installation caveat wrongly included the
+  pre-commit hook (it builds from this Git repo via `pip install .`,
+  never from PyPI, so it already works today) and omitted the GitLab CI
+  component (which does `pip install` from the real PyPI index, and is
+  genuinely affected).
+
 ## [0.1.22] - 2026-09-21
 
 ### Fixed

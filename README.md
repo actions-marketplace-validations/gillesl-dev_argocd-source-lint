@@ -114,9 +114,11 @@ pip install argocd-source-lint
 
 > Currently published to TestPyPI only, pending v1.0.0 (see
 > [Development](#development) for the TestPyPI install command). The
-> [GitHub Action](#github-actions) and [pre-commit hook](#pre-commit)
-> below will start working end-to-end once the package lands on the
-> real PyPI index.
+> [GitHub Action](#github-actions) and [GitLab CI](#gitlab-ci) component
+> below both `pip install` from the real PyPI index and will start
+> working end-to-end once the package lands there. The
+> [pre-commit hook](#pre-commit) already works today — pre-commit builds
+> it directly from this Git repo (`pip install .`), never from PyPI.
 
 ## Usage
 
