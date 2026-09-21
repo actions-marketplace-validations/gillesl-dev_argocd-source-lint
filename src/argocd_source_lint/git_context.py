@@ -112,14 +112,44 @@ def is_revision_resolvable(repo_root: Path, revision: str) -> bool:
     return result.returncode == 0
 
 
+_RESOLVED_COMMIT_CACHE: dict[tuple[Path, str], str | None] = {}
+
+
 def _resolve_commit(repo_root: Path, revision: str) -> str | None:
+    # `revision_matches_checkout` (via `coverage._resolved_source_root`)
+    # runs once per local source, per rule -- with N local-source rules
+    # and M sources sharing the same `targetRevision` (`HEAD`, usually),
+    # that's N*M identical `git rev-parse` calls for the exact same
+    # answer. Confirmed to matter for real: 50 Applications, all
+    # `targetRevision: HEAD`, cost 702 of them (~58s on Windows, where
+    # subprocess spawn itself dominates). Cleared once per CLI
+    # invocation (`clear_caches`), not just kept for the process
+    # lifetime: the repo's HEAD can genuinely move between two
+    # `argocd-source-lint` runs sharing a process only in tests
+    # (`CliRunner.invoke` twice against the same mutated repo), never
+    # in real usage (one process per run).
+    cache_key = (repo_root, revision)
+    if cache_key in _RESOLVED_COMMIT_CACHE:
+        return _RESOLVED_COMMIT_CACHE[cache_key]
+
     result = subprocess.run(
         ["git", "rev-parse", f"{revision}^{{commit}}"],
         cwd=repo_root,
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else None
+    resolved = result.stdout.strip() if result.returncode == 0 else None
+    _RESOLVED_COMMIT_CACHE[cache_key] = resolved
+    return resolved
+
+
+def clear_caches() -> None:
+    """Resets every module-level cache here (`_resolve_commit`,
+    `materialize_revision`) -- called once at the start of `cli.lint`,
+    so each CLI invocation starts clean rather than these persisting
+    for the life of the process (see `_resolve_commit`)."""
+    _RESOLVED_COMMIT_CACHE.clear()
+    _REVISION_SNAPSHOT_CACHE.clear()
 
 
 def revision_matches_checkout(repo_root: Path, revision: str) -> bool | None:

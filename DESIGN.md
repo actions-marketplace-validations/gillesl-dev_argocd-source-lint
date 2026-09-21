@@ -264,6 +264,31 @@ loop) is now only found once per traversal too, rather than double-
 counted — not something this pass set out to fix, but a strict
 improvement over the previous behavior either way.
 
+## Caching `git rev-parse` for the life of one CLI run
+
+`revision_matches_checkout` (via `coverage._resolved_source_root`) runs
+once per local source, per rule that resolves one — with N such rules
+and every source sharing the same `targetRevision` (`HEAD`, the
+overwhelming common case), that's N identical `git rev-parse` calls
+for the exact same answer, repeated per Application. Confirmed for
+real, not estimated: 50 Applications, all `targetRevision: HEAD`, cost
+702 of the 754 `git` subprocess calls in a full run — about 58 seconds
+on Windows, where subprocess spawn itself dominates the cost, not
+`git`'s own work.
+
+`git_context._resolve_commit` now caches by `(repo_root, revision)`,
+collapsing those 702 calls to 1. The cache is process-lifetime module
+state, same as `materialize_revision`'s own `_REVISION_SNAPSHOT_CACHE`
+— safe in real usage (one OS process per `argocd-source-lint`
+invocation, and a repo's history never changes mid-run since nothing
+here writes to it), but a test harness calling the CLI twice
+in-process against a repo it mutates between calls (`git_commit`
+between two `CliRunner.invoke`s sharing one Python process) would
+otherwise see the first call's stale answer on the second. `clear_caches`
+resets both caches; `cli.lint` calls it once at the very start of every
+invocation, so this only ever matters for that in-process-test
+scenario, never for a real run.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

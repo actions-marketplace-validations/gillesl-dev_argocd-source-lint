@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.28] - 2026-09-21
+
+### Fixed
+
+- 50 Applications sharing `targetRevision: HEAD` cost 702 identical
+  `git rev-parse` calls in a single run — confirmed for real, not
+  estimated: ~58 seconds on Windows, where subprocess spawn dominates
+  the cost. Every local-source rule independently re-resolved the same
+  revision against the same checkout with no caching at all.
+  `git_context._resolve_commit` now caches by `(repo_root, revision)`
+  for the life of one CLI invocation, collapsing the same run to 1
+  call and ~5 seconds. A caching change must never alter results, only
+  speed — verified: identical findings before and after, and a
+  dedicated test confirms a repo mutated between two invocations still
+  gets a fresh answer (the one scenario a naive process-lifetime cache
+  could get wrong).
+
 ## [0.1.27] - 2026-09-21
 
 ### Fixed
