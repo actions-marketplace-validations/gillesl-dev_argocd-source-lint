@@ -3,10 +3,21 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [Unreleased]
+## [0.1.23] - 2026-09-21
 
 ### Fixed
 
+- SARIF's `$schema` pointed at the spec repo's mutable `master` branch
+  instead of GitHub's own recommended
+  `https://json.schemastore.org/sarif-2.1.0.json`. Results had no
+  `partialFingerprints`, which GitHub's docs call essential for
+  matching the same finding across runs — without it, an unrelated
+  change elsewhere can make every finding look like a new alert.
+- JUnit `<testcase name=...>` was the finding's raw message, and two
+  different findings (different file/Application) can share that
+  message verbatim — GitLab's JUnit parser silently drops every
+  testcase after the first with a duplicate name. A `(#N)` suffix on an
+  exact repeat keeps every finding visible.
 - README's "pending real PyPI" installation caveat wrongly included the
   pre-commit hook (it builds from this Git repo via `pip install .`,
   never from PyPI, so it already works today) and omitted the GitLab CI
@@ -24,6 +35,12 @@ All notable changes to this project are documented in this file, in
   GitLab instance, referenced by any ref (tag, branch or commit SHA) —
   confirmed against GitLab's own component docs. Publishing to the
   Catalog is a separate, optional step for public discoverability.
+
+### Added
+
+- Rules now carry `fullDescription`, `helpUri` and
+  `defaultConfiguration.level` in the SARIF output (recommended fields
+  GitHub's UI uses for filtering/detail pages).
 
 ## [0.1.22] - 2026-09-21
 
