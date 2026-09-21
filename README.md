@@ -202,9 +202,15 @@ accept the current state again (it overwrites the file outright).
 
 ### GitLab CI
 
+Requires publishing [`templates/lint.yml`](./templates/lint.yml) to a
+GitLab CI/CD Catalog project in your own GitLab group first (this repo
+is hosted on GitHub, not GitLab, so there's no component to include
+directly from here). Replace `<your-gitlab-group>` below with that
+group's path:
+
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.18
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.18
     inputs:
       scope: manifests/
 ```
