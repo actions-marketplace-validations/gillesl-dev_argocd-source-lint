@@ -157,11 +157,14 @@ hides that it's doing something.
 The match is exact on all four fields, deliberately no fuzzy/partial
 matching: a change to the finding's message (e.g. the path shifting after
 a rename) makes it "new" again rather than silently staying suppressed
-forever under a stale description. This mirrors the fingerprint already
-used by `reporters/gitlab_codequality.py`, kept as two independent
-implementations rather than shared — one feeds an opaque MD5 for GitLab's
-UI, the other needs the fields spelled out for human review, so
-unifying them would only add an indirection neither side needs.
+forever under a stale description. This mirrors what
+`reporters/fingerprint.py`'s hash already does for SARIF/GitLab Code
+Quality (same four fields, same content-based stability) — but the
+baseline file deliberately keeps its own separate, human-readable
+implementation rather than reusing that opaque MD5: a reviewer reading a
+PR diff to `.argocd-lint-baseline.yaml` needs the fields spelled out,
+not a hash, so unifying the two would only add an indirection this side
+needs to reverse right back.
 
 The reverse problem exists too: an entry accepted once but never
 revisited, for an issue since fixed, renamed, or removed, still sits in
