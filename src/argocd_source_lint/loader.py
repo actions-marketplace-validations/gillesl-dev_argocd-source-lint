@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
+from argocd_source_lint.fsutil import discover_documents
 from argocd_source_lint.models import Application, IgnoreDiffRule, Source
 
 
@@ -20,10 +20,9 @@ class RawManifestDiscovery(ApplicationDiscovery):
 
     def discover(self, repo_root: Path) -> list[Application]:
         applications: list[Application] = []
-        for manifest_path in sorted(iter_yaml_files(repo_root)):
-            for doc in load_yaml_documents(manifest_path):
-                if _is_argocd_application(doc):
-                    applications.append(build_application(doc, manifest_path, repo_root))
+        for manifest_path, doc in discover_documents(repo_root):
+            if _is_argocd_application(doc):
+                applications.append(build_application(doc, manifest_path, repo_root))
         return applications
 
 

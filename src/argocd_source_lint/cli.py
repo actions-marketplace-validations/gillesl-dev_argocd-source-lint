@@ -14,7 +14,9 @@ from argocd_source_lint.baseline import (
     stale_baseline_entries,
     write_baseline,
 )
-from argocd_source_lint.git_context import clear_caches, get_origin_url, is_git_available
+from argocd_source_lint.fsutil import clear_caches as clear_discovery_cache
+from argocd_source_lint.git_context import clear_caches as clear_git_caches
+from argocd_source_lint.git_context import get_origin_url, is_git_available
 from argocd_source_lint.loader import RawManifestDiscovery
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy, load_policy
@@ -113,7 +115,8 @@ def lint(
         )
         raise typer.Exit(code=2)
 
-    clear_caches()
+    clear_git_caches()
+    clear_discovery_cache()
     policy = load_policy(repo_root)
     applications = RawManifestDiscovery().discover(repo_root)
     local_origin = get_origin_url(repo_root)

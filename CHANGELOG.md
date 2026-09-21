@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.29] - 2026-09-21
+
+### Fixed
+
+- `RawManifestDiscovery`, the ApplicationSet walker and
+  `discover_app_projects` each independently walked the entire repo
+  and parsed every YAML file, each looking for a different `kind` —
+  three full passes over the same files. Confirmed for real: 2,000
+  plain manifests (none of them an Application/ApplicationSet/
+  AppProject) cost ~5s total across the three passes.
+  `fsutil.discover_documents` now does that walk once and caches it
+  (same scoping as `_resolve_commit`'s cache, reset via
+  `clear_caches`); the three callers just filter the shared result by
+  `kind`. Every existing call site's own signature is unchanged.
+
 ## [0.1.28] - 2026-09-21
 
 ### Fixed

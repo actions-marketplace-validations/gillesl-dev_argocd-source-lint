@@ -133,3 +133,40 @@ def load_yaml_documents(path: Path) -> list[dict[str, Any]]:
     except (YAMLError, UnicodeDecodeError):
         return []
     return [doc for doc in docs if isinstance(doc, dict) and is_within_budget(doc)]
+
+
+_DISCOVERED_DOCUMENTS_CACHE: dict[Path, list[tuple[Path, dict[str, Any]]]] = {}
+
+
+def discover_documents(repo_root: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Every YAML document in the repo, as `(manifest_path, doc)` pairs --
+    shared by the three independent top-level discovery passes
+    (`RawManifestDiscovery`, the ApplicationSet walker,
+    `discover_app_projects`), each of which is only looking for one
+    `kind` and would otherwise re-walk and re-parse every file in the
+    repo to find it. Confirmed to matter for real: 2,000 plain
+    manifests (zero Applications/ApplicationSets/AppProjects among
+    them) cost ~5s across the three independent passes before this
+    cache existed. Cached by `repo_root` for the life of one CLI
+    invocation (`clear_caches`) -- same reasoning and same risk as
+    `git_context`'s revision cache: safe because nothing here writes to
+    the repo mid-run, and a direct caller bypassing `cli.lint` (every
+    test in this suite does) must call `clear_caches()` itself between
+    two calls if it mutates the repo in between."""
+    if repo_root in _DISCOVERED_DOCUMENTS_CACHE:
+        return _DISCOVERED_DOCUMENTS_CACHE[repo_root]
+
+    documents = [
+        (manifest_path, doc)
+        for manifest_path in sorted(iter_yaml_files(repo_root))
+        for doc in load_yaml_documents(manifest_path)
+    ]
+    _DISCOVERED_DOCUMENTS_CACHE[repo_root] = documents
+    return documents
+
+
+def clear_caches() -> None:
+    """Resets `discover_documents`' cache -- called once at the start of
+    `cli.lint`, so each CLI invocation starts clean rather than this
+    persisting for the life of the process."""
+    _DISCOVERED_DOCUMENTS_CACHE.clear()

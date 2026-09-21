@@ -289,6 +289,27 @@ resets both caches; `cli.lint` calls it once at the very start of every
 invocation, so this only ever matters for that in-process-test
 scenario, never for a real run.
 
+## Sharing one discovery pass across Application/ApplicationSet/AppProject
+
+`RawManifestDiscovery`, `applicationset.discover` and
+`discover_app_projects` each walk the entire repo and parse every YAML
+file looking for one specific `kind` — three independent, full passes
+over the same files for what only ever needs one. Confirmed for real:
+2,000 plain manifests (zero Applications/ApplicationSets/AppProjects
+among them, the worst case for this — every file gets fully walked and
+parsed three times for nothing) cost ~5s total across the three passes.
+
+`fsutil.discover_documents` now does that walk once, returning every
+`(manifest_path, doc)` pair; the three callers just filter it by
+`kind` instead of re-walking. Cached by `repo_root`, same scoping and
+same reasoning as `_resolve_commit`'s cache above (life of one CLI
+invocation, reset via `clear_caches`) — every existing call site's own
+signature (`RawManifestDiscovery().discover(repo_root)`,
+`applicationset.discover(repo_root, ...)`,
+`discover_app_projects(repo_root)`) is unchanged, so this stayed
+purely internal to `fsutil.py` and the three call sites, no test outside
+`test_fsutil.py` needed to change.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

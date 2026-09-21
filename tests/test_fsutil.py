@@ -7,6 +7,8 @@ import pytest
 from ruamel.yaml import YAML
 
 from argocd_source_lint.fsutil import (
+    clear_caches,
+    discover_documents,
     is_within_budget,
     iter_yaml_files,
     load_yaml_documents,
@@ -104,3 +106,39 @@ def test_iter_yaml_files_breaks_a_self_referential_directory_cycle(tmp_path: Pat
     # exactly the cycle being broken -- `app.yaml` is found once, via
     # its real path, never via `loop` at all.
     assert found == [tmp_path / "app.yaml"]
+
+
+def test_discover_documents_is_cached_across_repeated_calls(tmp_path: Path, monkeypatch):
+    """`RawManifestDiscovery`, the ApplicationSet walker and
+    `discover_app_projects` each call this looking for a different
+    `kind` -- without caching, that's the whole repo walked and parsed
+    three times over. Confirmed to matter for real: 2,000 plain
+    manifests (no Application/ApplicationSet/AppProject among them)
+    cost ~5s across the three independent passes."""
+    (tmp_path / "app.yaml").write_text(
+        "apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: a\n",
+        encoding="utf-8",
+    )
+    clear_caches()
+    calls = []
+    real_iter_yaml_files = iter_yaml_files
+    monkeypatch.setattr(
+        "argocd_source_lint.fsutil.iter_yaml_files",
+        lambda *a, **k: (calls.append(1) or real_iter_yaml_files(*a, **k)),
+    )
+
+    first = discover_documents(tmp_path)
+    second = discover_documents(tmp_path)
+
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_clear_caches_picks_up_a_new_file(tmp_path: Path):
+    clear_caches()
+    assert discover_documents(tmp_path) == []
+
+    (tmp_path / "app.yaml").write_text("kind: ConfigMap\n", encoding="utf-8")
+    clear_caches()
+
+    assert len(discover_documents(tmp_path)) == 1

@@ -7,12 +7,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from argocd_source_lint.fsutil import (
-    is_within_budget,
-    iter_yaml_files,
-    load_yaml_documents,
-    walk_tree,
-)
+from argocd_source_lint.fsutil import discover_documents, is_within_budget, walk_tree
 from argocd_source_lint.git_context import (
     is_local_repo_url,
     materialize_revision,
@@ -44,15 +39,12 @@ def discover(
     applications: list[Application] = []
     findings: list[Finding] = []
 
-    for manifest_path in sorted(iter_yaml_files(repo_root)):
-        for doc in load_yaml_documents(manifest_path):
-            if not _is_application_set(doc):
-                continue
-            expanded_apps, doc_findings = _expand(
-                doc, manifest_path, repo_root, local_origin, severity
-            )
-            applications.extend(expanded_apps)
-            findings.extend(doc_findings)
+    for manifest_path, doc in discover_documents(repo_root):
+        if not _is_application_set(doc):
+            continue
+        expanded_apps, doc_findings = _expand(doc, manifest_path, repo_root, local_origin, severity)
+        applications.extend(expanded_apps)
+        findings.extend(doc_findings)
 
     return applications, findings
 
