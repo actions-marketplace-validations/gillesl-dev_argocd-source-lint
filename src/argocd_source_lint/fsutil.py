@@ -71,17 +71,54 @@ def _expanded_size(node: Any, memo: dict[int, int], budget: int) -> int | None:
     return total
 
 
+def walk_tree(directory: Path) -> Iterator[Path]:
+    """Every file and directory under `directory`, breaking a directory
+    symlink/junction cycle instead of following it forever -- confirmed
+    to hang otherwise (a junction pointing back at an ancestor, a few
+    KB on disk); neither `Path.rglob` nor even `os.walk(followlinks=
+    False)` protect against it, only a "real" symlink, and a Windows
+    junction isn't one (`Path.is_symlink()` is `False` for it too --
+    see DESIGN.md "A directory symlink/junction cycle"). `.git` is
+    never descended into. Shared by `iter_yaml_files` and the
+    ApplicationSet `git` generator's own directory/file discovery."""
+    yield from _walk(directory, set())
+
+
+def _walk(directory: Path, seen: set[Path]) -> Iterator[Path]:
+    try:
+        resolved = directory.resolve()
+    except OSError:
+        return
+    if resolved in seen:
+        return
+    seen.add(resolved)
+
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+
+    for entry in entries:
+        if entry.name == ".git":
+            continue
+        yield entry
+        if entry.is_dir():
+            yield from _walk(entry, seen)
+
+
 def iter_yaml_files(directory: Path, *, recurse: bool = True) -> Iterator[Path]:
     """`.yaml`/`.yml` files under `directory`. `recurse=False` (ArgoCD's
     default for a `directory` source without an explicit `recurse: true`,
     see DESIGN.md) does not descend into subdirectories."""
-    for pattern in ("*.yaml", "*.yml"):
-        walker = directory.rglob(pattern) if recurse else directory.glob(pattern)
-        for path in walker:
-            if not path.is_file():
-                continue
-            if recurse and ".git" in path.parts:
-                continue
+    if not recurse:
+        for pattern in ("*.yaml", "*.yml"):
+            for path in directory.glob(pattern):
+                if path.is_file():
+                    yield path
+        return
+
+    for path in walk_tree(directory):
+        if path.is_file() and path.name.endswith((".yaml", ".yml")):
             yield path
 
 

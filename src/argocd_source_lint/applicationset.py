@@ -7,7 +7,12 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from argocd_source_lint.fsutil import is_within_budget, iter_yaml_files, load_yaml_documents
+from argocd_source_lint.fsutil import (
+    is_within_budget,
+    iter_yaml_files,
+    load_yaml_documents,
+    walk_tree,
+)
 from argocd_source_lint.git_context import (
     is_local_repo_url,
     materialize_revision,
@@ -394,17 +399,13 @@ def _resolve_merge(
 
 def _list_local_directories(repo_root: Path) -> list[str]:
     return [
-        path.relative_to(repo_root).as_posix()
-        for path in repo_root.rglob("*")
-        if path.is_dir() and ".git" not in path.parts
+        path.relative_to(repo_root).as_posix() for path in walk_tree(repo_root) if path.is_dir()
     ]
 
 
 def _list_local_files(repo_root: Path) -> list[str]:
     return [
-        path.relative_to(repo_root).as_posix()
-        for path in repo_root.rglob("*")
-        if path.is_file() and ".git" not in path.parts
+        path.relative_to(repo_root).as_posix() for path in walk_tree(repo_root) if path.is_file()
     ]
 
 

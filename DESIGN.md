@@ -237,6 +237,33 @@ its own params files independently of `fsutil.py` (a `files:` target
 isn't a `kind: Application`-shaped document), so it calls the same
 `is_within_budget` directly rather than being covered for free.
 
+## A directory symlink/junction cycle
+
+A directory symlink pointing back at one of its own ancestors is a
+few-KB structure that makes a naive recursive walk run forever —
+confirmed for real (not assumed) on Windows with a junction (Windows'
+other reparse-point type for a directory, distinct from a symlink —
+`Path.is_symlink()` is `False` for one, same as a real symlink would
+be for `os.walk`). Neither `Path.rglob` nor `os.walk(directory,
+followlinks=False)` protect against it: the latter's guard only
+recognizes a POSIX-style symlink, and a Windows junction isn't
+reported as one, so it gets followed regardless of the flag.
+
+`fsutil.py` previously walked with bare `Path.rglob`/`Path.glob`
+(`iter_yaml_files`) and `Path.rglob("*")`
+(`applicationset._list_local_directories`/`_list_local_files`, the
+`git` ApplicationSet generator's own discovery) — three independent,
+unguarded call sites. `fsutil.walk_tree` replaces all three with one
+shared, cycle-safe recursive walk: each directory is resolved once
+(`Path.resolve()`, the same identity-tracking already used by
+`coverage.covered_files_for_kustomize_dir` for a Kustomize `resources:`
+cycle) and never re-descended into. A side effect, not the goal: a
+file reachable through two *different*, non-cyclic logical paths to
+the same physical directory (an ordinary symlink used for reuse, not a
+loop) is now only found once per traversal too, rather than double-
+counted — not something this pass set out to fix, but a strict
+improvement over the previous behavior either way.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

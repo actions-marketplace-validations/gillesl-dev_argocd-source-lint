@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import pytest
 from ruamel.yaml import YAML
 
-from argocd_source_lint.fsutil import is_within_budget, load_yaml_documents
+from argocd_source_lint.fsutil import (
+    is_within_budget,
+    iter_yaml_files,
+    load_yaml_documents,
+    walk_tree,
+)
+
+
+def _symlink_or_skip(target: Path, link: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        pytest.skip("creating a directory symlink needs a privilege not available here")
 
 
 def _alias_bomb_yaml(layers: int, tail: str) -> str:
@@ -65,3 +79,28 @@ def test_load_yaml_documents_still_parses_an_ordinary_multi_document_file(tmp_pa
     docs = load_yaml_documents(path)
 
     assert [doc["metadata"]["name"] for doc in docs] == ["a", "b"]
+
+
+def test_walk_tree_breaks_a_self_referential_directory_cycle(tmp_path: Path):
+    """A directory symlink/junction pointing back at an ancestor of
+    itself -- confirmed to hang `Path.rglob`, and even
+    `os.walk(followlinks=False)` (a Windows junction isn't reported as
+    a symlink, so that guard never triggers) -- must terminate here."""
+    (tmp_path / "app.yaml").write_text("kind: ConfigMap\n", encoding="utf-8")
+    _symlink_or_skip(tmp_path, tmp_path / "loop")
+
+    paths = list(walk_tree(tmp_path))
+
+    assert tmp_path / "app.yaml" in paths
+
+
+def test_iter_yaml_files_breaks_a_self_referential_directory_cycle(tmp_path: Path):
+    (tmp_path / "app.yaml").write_text("kind: ConfigMap\n", encoding="utf-8")
+    _symlink_or_skip(tmp_path, tmp_path / "loop")
+
+    found = list(iter_yaml_files(tmp_path))
+
+    # `loop` points at `tmp_path` itself, so descending into it is
+    # exactly the cycle being broken -- `app.yaml` is found once, via
+    # its real path, never via `loop` at all.
+    assert found == [tmp_path / "app.yaml"]

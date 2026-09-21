@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.27] - 2026-09-21
+
+### Fixed
+
+- A directory symlink/junction pointing back at one of its own
+  ancestors made file discovery run forever — confirmed for real with
+  a Windows junction (a few KB on disk). Neither `Path.rglob` nor even
+  `os.walk(directory, followlinks=False)` protect against it: a
+  junction isn't reported as a symlink, so that guard never triggers.
+  `fsutil.walk_tree` replaces three independent, unguarded `rglob`
+  call sites (`iter_yaml_files`, and the ApplicationSet `git`
+  generator's own directory/file discovery) with one shared,
+  cycle-safe walk — each directory resolved once and never
+  re-descended into, the same identity-tracking already used for a
+  Kustomize `resources:` cycle. As a side effect, a file reachable
+  through two different non-cyclic paths to the same physical
+  directory is now found once per traversal instead of double-counted.
+
 ## [0.1.26] - 2026-09-21
 
 ### Fixed
