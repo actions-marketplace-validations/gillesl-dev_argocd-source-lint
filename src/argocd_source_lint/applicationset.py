@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,22 @@ from argocd_source_lint.loader import build_application
 from argocd_source_lint.models import Application, Finding, Severity
 
 RULE_ID = "unresolvable-generator"
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratorContext:
+    """Everything a generator resolver needs besides its own generator
+    dict, threaded unchanged through every level of `_resolve_generator`'s
+    recursion (`matrix`/`merge` calling back into it for each child) --
+    bundled here instead of six positional parameters repeated across
+    every one of those functions."""
+
+    repo_root: Path
+    local_origin: str | None
+    appset_name: str
+    source_file: Path
+    severity: Severity
+
 
 # Classic ApplicationSet templating (`{{key}}`, valyala/fasttemplate) —
 # `spec.goTemplate: true` switches to Go template syntax instead, which is
@@ -64,18 +81,22 @@ def _expand(
 ) -> tuple[list[Application], list[Finding]]:
     metadata = doc.get("metadata", {}) or {}
     spec = doc.get("spec", {}) or {}
-    appset_name = metadata.get("name", "")
     try:
         source_file = manifest_path.relative_to(repo_root)
     except ValueError:
         source_file = manifest_path
+    ctx = GeneratorContext(
+        repo_root=repo_root,
+        local_origin=local_origin,
+        appset_name=metadata.get("name", ""),
+        source_file=source_file,
+        severity=severity,
+    )
 
     if spec.get("goTemplate"):
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                severity,
+                ctx,
                 "`goTemplate: true` (Go template rendering) is out of scope v1 — "
                 "only the classic `{{key}}` substitution is supported.",
             )
@@ -88,9 +109,7 @@ def _expand(
     for generator in spec.get("generators") or []:
         if not isinstance(generator, dict):
             continue
-        param_sets, generator_findings = _resolve_generator(
-            generator, repo_root, local_origin, appset_name, source_file, severity
-        )
+        param_sets, generator_findings = _resolve_generator(generator, ctx)
         findings.extend(generator_findings)
         for params in param_sets:
             applications.append(
@@ -114,19 +133,12 @@ def _build_generated_application(
 
 
 def _resolve_generator(
-    generator: dict[str, Any],
-    repo_root: Path,
-    local_origin: str | None,
-    appset_name: str,
-    source_file: Path,
-    severity: Severity,
+    generator: dict[str, Any], ctx: GeneratorContext
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     if generator.get("selector"):
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                severity,
+                ctx,
                 "generator has a `selector` (label filter on the generated params) — "
                 "this tool doesn't evaluate label selectors, out of scope v1; every "
                 "combination is left unexpanded rather than guessed at.",
@@ -136,34 +148,16 @@ def _resolve_generator(
     if "list" in generator:
         return _resolve_list(generator.get("list") or {}), []
     if "git" in generator:
-        return _resolve_git(
-            generator.get("git") or {}, repo_root, local_origin, appset_name, source_file, severity
-        )
+        return _resolve_git(generator.get("git") or {}, ctx)
     if "matrix" in generator:
-        return _resolve_matrix(
-            generator.get("matrix") or {},
-            repo_root,
-            local_origin,
-            appset_name,
-            source_file,
-            severity,
-        )
+        return _resolve_matrix(generator.get("matrix") or {}, ctx)
     if "merge" in generator:
-        return _resolve_merge(
-            generator.get("merge") or {},
-            repo_root,
-            local_origin,
-            appset_name,
-            source_file,
-            severity,
-        )
+        return _resolve_merge(generator.get("merge") or {}, ctx)
 
     kind = next(iter(generator), "unknown")
     return [], [
         _finding(
-            appset_name,
-            source_file,
-            severity,
+            ctx,
             f"`{kind}` generator requires live cluster/API access — out of scope v1, "
             "this tool only reads the local Git checkout.",
         )
@@ -176,20 +170,13 @@ def _resolve_list(list_generator: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _resolve_git(
-    git_generator: dict[str, Any],
-    repo_root: Path,
-    local_origin: str | None,
-    appset_name: str,
-    source_file: Path,
-    severity: Severity,
+    git_generator: dict[str, Any], ctx: GeneratorContext
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     repo_url = git_generator.get("repoURL", "")
-    if not is_local_repo_url(repo_url, local_origin):
+    if not is_local_repo_url(repo_url, ctx.local_origin):
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                severity,
+                ctx,
                 "git generator targets a different repo — out of scope v1, this tool "
                 "only verifies sources in the repo it runs in, see DESIGN.md.",
             )
@@ -204,33 +191,31 @@ def _resolve_git(
     # `coverage._resolved_source_root` (DESIGN.md "targetRevision drift"),
     # reused here rather than a second implementation.
     revision = git_generator.get("revision") or "HEAD"
-    matches_checkout = revision_matches_checkout(repo_root, revision)
+    matches_checkout = revision_matches_checkout(ctx.repo_root, revision)
     if matches_checkout is None:
         # `is None`, not `is False` -- a revision that doesn't resolve at
         # all must never fall through as "matches HEAD" by default.
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                Severity.UNVERIFIABLE,
+                ctx,
                 f"git generator's revision `{revision}` missing from the local "
                 "checkout — unable to tell which directories/files it would "
                 "discover. Add `fetch-depth: 0` or fetch the branch in question "
                 "in CI.",
+                severity=Severity.UNVERIFIABLE,
             )
         ]
 
-    base_root = repo_root
+    base_root = ctx.repo_root
     if matches_checkout is False:
-        snapshot_root = materialize_revision(repo_root, revision)
+        snapshot_root = materialize_revision(ctx.repo_root, revision)
         if snapshot_root is None:
             return [], [
                 _finding(
-                    appset_name,
-                    source_file,
-                    Severity.UNVERIFIABLE,
+                    ctx,
                     f"git generator's revision `{revision}` could not be extracted "
                     "from the local checkout.",
+                    severity=Severity.UNVERIFIABLE,
                 )
             ]
         base_root = snapshot_root
@@ -279,12 +264,7 @@ def _resolve_git_files(repo_root: Path, entries: list[Any]) -> list[dict[str, st
 
 
 def _resolve_matrix(
-    matrix_generator: dict[str, Any],
-    repo_root: Path,
-    local_origin: str | None,
-    appset_name: str,
-    source_file: Path,
-    severity: Severity,
+    matrix_generator: dict[str, Any], ctx: GeneratorContext
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     children = matrix_generator.get("generators") or []
 
@@ -296,9 +276,7 @@ def _resolve_matrix(
         # ArgoCD itself would never actually generate.
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                severity,
+                ctx,
                 "matrix generator has more than 2 child generators — ArgoCD only "
                 "supports combining exactly two and errors out on more, so this tool "
                 "doesn't guess at what it would generate either.",
@@ -311,9 +289,7 @@ def _resolve_matrix(
     for child in children:
         if not isinstance(child, dict):
             continue
-        params, child_findings = _resolve_generator(
-            child, repo_root, local_origin, appset_name, source_file, severity
-        )
+        params, child_findings = _resolve_generator(child, ctx)
         findings.extend(child_findings)
         param_lists.append(params)
 
@@ -327,20 +303,13 @@ def _resolve_matrix(
 
 
 def _resolve_merge(
-    merge_generator: dict[str, Any],
-    repo_root: Path,
-    local_origin: str | None,
-    appset_name: str,
-    source_file: Path,
-    severity: Severity,
+    merge_generator: dict[str, Any], ctx: GeneratorContext
 ) -> tuple[list[dict[str, str]], list[Finding]]:
     merge_keys = [str(key) for key in (merge_generator.get("mergeKeys") or [])]
     if not merge_keys:
         return [], [
             _finding(
-                appset_name,
-                source_file,
-                severity,
+                ctx,
                 "merge generator has no `mergeKeys` — matching semantics are "
                 "unspecified upstream, this tool doesn't guess at them.",
             )
@@ -353,9 +322,7 @@ def _resolve_merge(
     for child in children:
         if not isinstance(child, dict):
             continue
-        params, child_findings = _resolve_generator(
-            child, repo_root, local_origin, appset_name, source_file, severity
-        )
+        params, child_findings = _resolve_generator(child, ctx)
         findings.extend(child_findings)
         child_results.append((params, bool(child_findings)))
 
@@ -446,11 +413,11 @@ def _substitute(value: Any, params: dict[str, str]) -> Any:
     return value
 
 
-def _finding(app_name: str, source_file: Path, severity: Severity, message: str) -> Finding:
+def _finding(ctx: GeneratorContext, message: str, *, severity: Severity | None = None) -> Finding:
     return Finding(
         rule_id=RULE_ID,
-        severity=severity,
-        application=app_name,
+        severity=ctx.severity if severity is None else severity,
+        application=ctx.appset_name,
         message=message,
-        file=source_file,
+        file=ctx.source_file,
     )

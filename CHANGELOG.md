@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.30] - 2026-09-21
+
+### Changed
+
+- `applicationset.py`'s four generator resolvers
+  (`_resolve_generator`/`_resolve_git`/`_resolve_matrix`/
+  `_resolve_merge`) each repeated the same five parameters
+  (`repo_root`, `local_origin`, `appset_name`, `source_file`,
+  `severity`) alongside their own generator dict. Replaced with a
+  single `GeneratorContext`. Internal only, no behavior change, no
+  call site outside this file.
+
 ## [0.1.29] - 2026-09-21
 
 ### Fixed

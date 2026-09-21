@@ -124,7 +124,7 @@ def test_discover_documents_is_cached_across_repeated_calls(tmp_path: Path, monk
     real_iter_yaml_files = iter_yaml_files
     monkeypatch.setattr(
         "argocd_source_lint.fsutil.iter_yaml_files",
-        lambda *a, **k: (calls.append(1) or real_iter_yaml_files(*a, **k)),
+        lambda *a, **k: calls.append(1) or real_iter_yaml_files(*a, **k),
     )
 
     first = discover_documents(tmp_path)

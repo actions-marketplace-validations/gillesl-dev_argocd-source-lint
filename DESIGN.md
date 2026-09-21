@@ -310,6 +310,23 @@ signature (`RawManifestDiscovery().discover(repo_root)`,
 purely internal to `fsutil.py` and the three call sites, no test outside
 `test_fsutil.py` needed to change.
 
+## `GeneratorContext`
+
+`_resolve_generator`, `_resolve_git`, `_resolve_matrix` and
+`_resolve_merge` all needed the exact same five things alongside their
+own generator dict — `repo_root`, `local_origin`, `appset_name`,
+`source_file`, `severity` — threaded unchanged through every level of
+the recursion (`matrix`/`merge` calling back into `_resolve_generator`
+for each child). A plain `@dataclass(frozen=True, slots=True)` (not a
+pydantic `BaseModel`: this never crosses a validation boundary, it's
+purely an internal parameter bundle, so pulling in validation overhead
+for it would blur the line with `models.py`'s actual role) replaces
+those five repeated positional parameters with one `ctx`, and
+`_finding(ctx, message, severity=...)` takes an optional override for
+the two `UNVERIFIABLE` cases in `_resolve_git` that don't use the
+policy-configured severity. No behavior change — purely internal, no
+call site outside this file.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually
