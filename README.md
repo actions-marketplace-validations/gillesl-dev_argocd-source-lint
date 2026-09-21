@@ -48,6 +48,7 @@ sensitive data involved.
 | `malformed-ignore-diff-pointer` | warning | an `ignoreDifferences` `jsonPointers` entry doesn't start with `/` (RFC 6901) — it matches nothing, so the field isn't actually ignored |
 | `unknown-sync-option` | warning | a `syncOptions` entry (Application-level or the per-resource `sync-options` annotation) doesn't match any ArgoCD-recognized key (case-sensitive) — likely a typo, silently ignored instead of erroring |
 | `unknown-resource-hook` | warning | an `argocd.argoproj.io/hook`/`hook-delete-policy` annotation value doesn't match any ArgoCD-recognized value — likely a typo, silently falls through instead of erroring |
+| `malformed-sync-wave` | warning | an `argocd.argoproj.io/sync-wave` annotation value isn't a valid integer — silently falls back to wave 0 instead of erroring |
 
 Sample run, table output (the default):
 
@@ -75,7 +76,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>unknown-sync-option, unknown-resource-hook"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>unknown-sync-option, unknown-resource-hook, malformed-sync-wave"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -157,6 +158,7 @@ rules:
   malformed-ignore-diff-pointer: warning
   unknown-sync-option: warning
   unknown-resource-hook: warning
+  malformed-sync-wave: warning
 
 unverifiable_blocks_ci: true
 
@@ -196,7 +198,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.19
+- uses: gillesl-dev/argocd-source-lint@v0.1.20
   with:
     path: .
 ```
@@ -211,7 +213,7 @@ group's path:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.19
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.20
     inputs:
       scope: manifests/
 ```
@@ -221,7 +223,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.19
+    rev: v0.1.20
     hooks:
       - id: argocd-source-lint
 ```

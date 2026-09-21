@@ -75,6 +75,7 @@ def test_sarif_structure_and_severity_mapping():
         "malformed-ignore-diff-pointer",
         "unknown-sync-option",
         "unknown-resource-hook",
+        "malformed-sync-wave",
     }
 
     results = run["results"]

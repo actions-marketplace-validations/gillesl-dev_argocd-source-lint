@@ -51,6 +51,10 @@ _RULES_METADATA = {
         "match any ArgoCD-recognized value -- likely a typo, silently falls through "
         "instead of erroring."
     ),
+    "malformed-sync-wave": (
+        "An argocd.argoproj.io/sync-wave annotation value isn't a valid integer -- "
+        "silently falls back to wave 0 instead of erroring."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {

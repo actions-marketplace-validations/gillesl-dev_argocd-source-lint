@@ -28,6 +28,7 @@ from argocd_source_lint.rules.hpa_selfheal_conflict import HpaSelfHealConflictRu
 from argocd_source_lint.rules.malformed_ignore_diff_pointer import (
     MalformedIgnoreDiffPointerRule,
 )
+from argocd_source_lint.rules.malformed_sync_wave import MalformedSyncWaveRule
 from argocd_source_lint.rules.missing_ignore_diff import MissingIgnoreDiffRule
 from argocd_source_lint.rules.orphan_source import OrphanSourceRule
 from argocd_source_lint.rules.phantom_target import PhantomTargetRule
@@ -55,6 +56,7 @@ RULES: list[Rule] = [
     MalformedIgnoreDiffPointerRule(),
     UnknownSyncOptionRule(),
     UnknownResourceHookRule(),
+    MalformedSyncWaveRule(),
 ]
 
 

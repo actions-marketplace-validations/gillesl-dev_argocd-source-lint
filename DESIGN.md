@@ -524,6 +524,23 @@ strings, consistently confirmed for every other case checked this way),
 not quoted directly — hence `unknown-resource-hook` staying ranked
 behind `unknown-sync-option` when this was prioritized.
 
+## `malformed-sync-wave`
+
+`argocd.argoproj.io/sync-wave` is parsed by ArgoCD's own `GetSyncWave`
+function using Go's `strconv.Atoi` (confirmed directly against the
+argo-cd source, since the docs themselves don't spell out the
+error-handling behavior) — a signed integer literal, nothing else. A
+value that fails to parse (a stray word, a decimal point, a value
+copy-pasted from a different annotation like `PreSync`) doesn't error:
+`Atoi`'s error return falls through to the same wave-0 default used
+when the annotation is absent entirely, exactly the unvalidated-string
+architecture already confirmed for `sync-options`/`hook`. The
+consequence is quieter than most of this tool's other findings — a
+resource just syncs in the default wave instead of the one intended,
+not obviously wrong unless you're specifically checking ordering — but
+the check itself is fully objective (does this parse as an integer?),
+not a guess.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

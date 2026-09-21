@@ -22,6 +22,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "malformed-ignore-diff-pointer": Severity.WARNING,
     "unknown-sync-option": Severity.WARNING,
     "unknown-resource-hook": Severity.WARNING,
+    "malformed-sync-wave": Severity.WARNING,
 }
 
 
