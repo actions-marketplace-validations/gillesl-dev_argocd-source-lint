@@ -28,6 +28,7 @@ sensitive data involved.
 - [Adopting on an existing repo](#adopting-on-an-existing-repo)
 - [CI/CD integration](#cicd-integration)
 - [Development](#development)
+- [Changelog](./CHANGELOG.md)
 - [License](#license)
 
 ## What the tool does
@@ -247,8 +248,9 @@ pip install --index-url https://test.pypi.org/simple/ \
 
 See [DESIGN.md](./DESIGN.md) for the reasoning behind the mono-repo v1
 scope, the `directory.recurse`/`include`/`exclude` semantics, and other
-non-obvious decisions, and [CONTRIBUTING.md](./CONTRIBUTING.md) to add a
-rule or an operator signature.
+non-obvious decisions, [CONTRIBUTING.md](./CONTRIBUTING.md) to add a
+rule or an operator signature, and [CHANGELOG.md](./CHANGELOG.md) for
+the version history.
 
 ## License
 
