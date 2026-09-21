@@ -579,3 +579,70 @@ metadata:
     findings = _run_missing_ignore_diff(repo_root)
 
     assert findings == []
+
+
+def test_keycloak_operator_flags_the_initial_admin_secret(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/kc-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kc-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/keycloak
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/keycloak/instance.yaml": """\
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: example-kc
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 1
+    assert "example-kc-initial-admin" in findings[0].message
+
+
+def test_external_secret_flags_its_default_target_secret(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/es-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: es-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/secrets
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/secrets/db-password.yaml": """\
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: db-password
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 1
+    assert findings[0].message.endswith(
+        "`Secret` `db-password` — ArgoCD risks resetting this out-of-Git-managed "
+        "field on every sync."
+    )

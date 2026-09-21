@@ -165,7 +165,8 @@ exclude_paths:
 
 # Additional operator signatures, on top of the built-in pack
 # (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi, Zalando
-# Postgres Operator) — never a replacement.
+# Postgres Operator, Keycloak Operator, External Secrets Operator)
+# — never a replacement.
 known_operators:
   - crd_trigger: my-operator.io/MyCRD
     name_from: metadata.name
@@ -195,7 +196,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.18
+- uses: gillesl-dev/argocd-source-lint@v0.1.19
   with:
     path: .
 ```
@@ -210,7 +211,7 @@ group's path:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.18
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.19
     inputs:
       scope: manifests/
 ```
@@ -220,7 +221,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.18
+    rev: v0.1.19
     hooks:
       - id: argocd-source-lint
 ```

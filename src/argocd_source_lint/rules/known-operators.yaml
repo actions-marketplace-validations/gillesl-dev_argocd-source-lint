@@ -65,3 +65,25 @@
   expect_ignore_on:
     - kind: Secret
       name_pattern: "{user}.{name}.credentials.postgresql.acid.zalan.do"
+
+# Only the default spec.bootstrapAdmin behavior (no explicit secret
+# override) produces this derived name -- confirmed against the
+# official Keycloak Operator docs. Same conditional-trigger limitation
+# as the KafkaUser entry above: a custom bootstrapAdmin secret isn't
+# covered.
+- crd_trigger: k8s.keycloak.org/Keycloak
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}-initial-admin"
+
+# spec.target.name defaults to the ExternalSecret's own metadata.name
+# when omitted (confirmed against the official API reference) -- an
+# explicit override isn't covered, a false negative rather than a
+# guess. Documented as a real ArgoCD/ESO footgun by Akuity's own
+# support KB, not assumed.
+- crd_trigger: external-secrets.io/ExternalSecret
+  name_from: metadata.name
+  expect_ignore_on:
+    - kind: Secret
+      name_pattern: "{name}"
