@@ -198,6 +198,45 @@ It's deliberately a nudge, not an enforced check: some teams may want
 their baseline to *stay* stable across a temporary dip in findings, and
 a hard failure here would fight that.
 
+## YAML alias bombs
+
+A YAML anchor referenced twice by a later anchor, `N` layers deep,
+expands to `2^N` nodes if anything ever fully materializes it — a
+"billion laughs" document, a few hundred bytes on disk. Confirmed for
+real, not assumed: a 724-byte params file (`clusters/prod.json` matched
+by an ApplicationSet `git` generator's `files:` pattern, straight out
+of the upstream docs' own example) hung `argocd-source-lint`
+indefinitely, and a manifest with a bombed `apiVersion` field did too.
+
+`ruamel.yaml`'s own loader is safe — an alias resolves to the *same*
+object, not a copy, confirmed empirically — so parsing itself never
+hangs. The danger is entirely downstream: the moment something
+stringifies or walks the result without knowing it may be densely
+aliased. Two call sites did exactly that: `applicationset._flatten_params`
+called `str()` on a list-valued param (a git `files:` params file is
+meant to hold plain, flat data — never expected to contain aliases at
+all), and five separate `str(doc.get("apiVersion", ""))`-style
+coercions across `loader.py`/`app_projects.py`/`applicationset.py`/
+`hpa_selfheal_conflict.py`/`missing_ignore_diff.py` all shared the
+exact same unguarded pattern.
+
+Rather than patching each stringification site defensively (this
+audit alone found five nearly-identical instances — easy to miss the
+next one), the fix sits at the one place virtually every document here
+is read through: `fsutil.load_yaml_documents` now rejects a document
+whose *fully expanded* size would exceed a generous budget
+(`is_within_budget`, 1,000,000 nodes — far more than any real manifest
+needs, far below what a bomb reaches within a handful of anchor
+layers), the same way it already silently drops a file that fails to
+parse outright. Computed via memoized recursion keyed by `id()`: an
+aliased subtree's size is computed once and reused for every later
+reference to it — the same reuse that keeps the bomb small on disk in
+the first place, so the check itself never re-does the exponential
+work it's guarding against. `applicationset._load_params_file` reads
+its own params files independently of `fsutil.py` (a `files:` target
+isn't a `kind: Application`-shaped document), so it calls the same
+`is_within_budget` directly rather than being covered for free.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

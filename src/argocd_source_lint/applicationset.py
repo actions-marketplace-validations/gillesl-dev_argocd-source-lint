@@ -7,7 +7,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from argocd_source_lint.fsutil import iter_yaml_files, load_yaml_documents
+from argocd_source_lint.fsutil import is_within_budget, iter_yaml_files, load_yaml_documents
 from argocd_source_lint.git_context import (
     is_local_repo_url,
     materialize_revision,
@@ -419,9 +419,14 @@ def _load_params_file(path: Path) -> Any:
         return None
     try:
         with path.open("r", encoding="utf-8") as f:
-            return _yaml_safe.load(f)  # valid JSON is also valid YAML
+            content = _yaml_safe.load(f)  # valid JSON is also valid YAML
     except (YAMLError, UnicodeDecodeError, OSError):
         return None
+    # This bypasses fsutil.load_yaml_documents' own budget check (a
+    # `files:` generator target isn't a `kind: Application`-shaped
+    # document, so it never goes through that path) -- checked directly
+    # instead of letting a YAML alias bomb reach _flatten_params' str().
+    return content if is_within_budget(content) else None
 
 
 def _flatten_params(obj: Any, prefix: str = "") -> dict[str, str]:

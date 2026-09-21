@@ -156,6 +156,53 @@ spec:
     assert applications[0].sources[0].path == "manifests/prod"
 
 
+def test_git_files_generator_ignores_a_params_file_that_is_a_yaml_alias_bomb(git_repo):
+    """A tiny "billion laughs" params file (each anchor aliases the
+    previous one twice) must never reach `_flatten_params`' `str()` on
+    the fully-expanded value -- confirmed to hang for real before
+    `fsutil.is_within_budget` existed."""
+    layers = 30
+    lines = ['a0: &a0 ["x"]']
+    for i in range(1, layers):
+        lines.append(f"a{i}: &a{i} [*a{i - 1}, *a{i - 1}]")
+    lines.append("cluster:")
+    lines.append("  name: prod")
+    lines.append(f"  bomb: *a{layers - 1}")
+    bomb_json = "\n".join(lines) + "\n"
+
+    repo_root = git_repo(
+        {
+            "clusters/prod.json": bomb_json,
+            "bootstrap/appsets/files-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: files-appset
+spec:
+  generators:
+    - git:
+        repoURL: https://example.invalid/repo.git
+        revision: HEAD
+        files:
+          - path: clusters/*.json
+  template:
+    metadata:
+      name: 'app-{{cluster.name}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: 'manifests/{{cluster.name}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    assert applications == []  # the bomb file is treated as unparseable
+
+
 def test_git_directories_generator_honors_a_pinned_revision(git_repo, git_tag, git_commit):
     """The generator's own `revision` is independent of the template's
     `targetRevision` (confirmed against the upstream Git generator docs)

@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.26] - 2026-09-21
+
+### Fixed
+
+- A YAML "billion laughs" alias bomb (a few hundred bytes, nested
+  anchors each referencing the previous one twice) hung the tool
+  indefinitely — confirmed for real against both an ApplicationSet
+  `git` generator's `files:` params file and a manifest with a bombed
+  `apiVersion` field. `ruamel.yaml`'s own loader is safe (an alias
+  resolves to the same object, not a copy); the hang came from code
+  downstream blindly stringifying the result. `fsutil.load_yaml_documents`
+  now rejects a document whose fully-expanded size would be
+  unreasonable (`is_within_budget`, computed via memoized recursion so
+  the check itself stays cheap), the same way it already drops a file
+  that fails to parse — closing this at the one place virtually every
+  document is read through, rather than patching each of the five
+  near-identical unguarded `str()` call sites this audit found.
+
 ## [0.1.25] - 2026-09-21
 
 ### Fixed

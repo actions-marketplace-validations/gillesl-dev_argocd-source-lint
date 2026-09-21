@@ -206,6 +206,28 @@ metadata:
     assert applications == []
 
 
+def test_ignores_a_manifest_that_is_a_yaml_alias_bomb(git_repo):
+    """A tiny "billion laughs" document (each anchor aliases the
+    previous one twice) must never reach `str(doc.get("apiVersion"))` --
+    confirmed to hang for real before `fsutil.is_within_budget` existed.
+    Treated the same as any other file that fails to parse."""
+    layers = 30
+    lines = ['a0: &a0 ["x"]']
+    for i in range(1, layers):
+        lines.append(f"a{i}: &a{i} [*a{i - 1}, *a{i - 1}]")
+    lines.append(f"apiVersion: *a{layers - 1}")
+    lines.append("kind: Application")
+    lines.append("metadata:")
+    lines.append("  name: bomb")
+    bomb_yaml = "\n".join(lines) + "\n"
+
+    repo_root = git_repo({"bootstrap/argocd-apps/bomb-app.yaml": bomb_yaml})
+
+    applications = RawManifestDiscovery().discover(repo_root)
+
+    assert applications == []
+
+
 def test_source_and_self_heal_line_numbers(git_repo):
     repo_root = git_repo(
         {
