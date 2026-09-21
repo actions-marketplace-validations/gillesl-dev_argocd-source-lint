@@ -18,6 +18,12 @@ All notable changes to this project are documented in this file, in
   `permissions: security-events: write` (`actions`/`contents: read` on
   private repos) the composite action's `upload-sarif` step needs, which
   GitHub never grants automatically to a composite action.
+- README's GitLab CI section overstated the prerequisite: using
+  `include: component:` never requires publishing to the CI/CD
+  Catalog, only a `README.md` + `templates/` in a project on the same
+  GitLab instance, referenced by any ref (tag, branch or commit SHA) —
+  confirmed against GitLab's own component docs. Publishing to the
+  Catalog is a separate, optional step for public discoverability.
 
 ## [0.1.22] - 2026-09-21
 

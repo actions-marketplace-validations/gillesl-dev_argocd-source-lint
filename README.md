@@ -221,11 +221,15 @@ jobs:
 
 ### GitLab CI
 
-Requires publishing [`templates/lint.yml`](./templates/lint.yml) to a
-GitLab CI/CD Catalog project in your own GitLab group first (this repo
-is hosted on GitHub, not GitLab, so there's no component to include
-directly from here). Replace `<your-gitlab-group>` below with that
-group's path:
+A `component:` include only works within the same GitLab instance as
+the consuming project, and this repo is hosted on GitHub — so copy
+[`templates/lint.yml`](./templates/lint.yml) into a project in your own
+GitLab group first, alongside a `README.md` at that project's root
+(GitLab's structural requirement for a component repository). No need
+to publish it to the CI/CD Catalog — that's an optional, separate step
+for public discoverability, not a prerequisite for `include:`. Any
+ref works after that (a tag, a branch, a commit SHA); replace
+`<your-gitlab-group>` and the ref below accordingly:
 
 ```yaml
 include:
