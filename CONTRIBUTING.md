@@ -66,6 +66,14 @@ to touch Python code to add an operator.
       name_pattern: "{name}-suffix"
 ```
 
+For an operator that derives one resource *per entry* of a mapping on
+the CRD (e.g. one Secret per user) rather than a single resource per
+instance, add `name_from_each` (a dotted path to that mapping) — each
+key becomes `{user}` alongside `{name}` in `name_pattern`, see the
+Zalando Postgres Operator entry in `known-operators.yaml` for a worked
+example. Don't add it speculatively: only when the operator's own docs
+confirm the derived name for real, never guessed at (see DESIGN.md).
+
 ## Code style
 
 - No comments except to explain a non-obvious WHY (a hidden constraint,

@@ -34,6 +34,7 @@ from argocd_source_lint.rules.phantom_target import PhantomTargetRule
 from argocd_source_lint.rules.project_scope import ProjectScopeViolationRule
 from argocd_source_lint.rules.revision_mismatch import RevisionMismatchRule
 from argocd_source_lint.rules.sync_validation_disabled import SyncValidationDisabledRule
+from argocd_source_lint.rules.unknown_resource_hook import UnknownResourceHookRule
 from argocd_source_lint.rules.unknown_sync_option import UnknownSyncOptionRule
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -53,6 +54,7 @@ RULES: list[Rule] = [
     DuplicateApplicationNameRule(),
     MalformedIgnoreDiffPointerRule(),
     UnknownSyncOptionRule(),
+    UnknownResourceHookRule(),
 ]
 
 

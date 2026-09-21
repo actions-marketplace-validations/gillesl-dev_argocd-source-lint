@@ -36,7 +36,7 @@ sensitive data involved.
 | --- | --- | --- |
 | `orphan-source` | error | a manifest present in the repo but not covered by any declared source |
 | `broken-values-ref` | error | a `$ref` in a Helm `valueFiles` entry with no matching source or file |
-| `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi...) with no `ignoreDifferences` while `selfHeal: true` is active |
+| `missing-ignore-diff` | warning | a known at-risk CRD (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi, Zalando Postgres Operator...) with no `ignoreDifferences` while `selfHeal: true` is active |
 | `phantom-target` | error | a `targetRevision`/`path` that resolves to nothing in the repo |
 | `unresolvable-generator` | info | an `ApplicationSet` generator this tool can't resolve from a local checkout alone (live cluster/API access, or `goTemplate: true` rendering) |
 | `double-coverage` | error | a file covered by more than one *different* Application at once, each syncing it from an independent loop |
@@ -46,7 +46,8 @@ sensitive data involved.
 | `sync-validation-disabled` | info | `Validate=false` sync option — an invalid manifest is applied anyway instead of blocking |
 | `duplicate-application-name` | error | two or more Applications share the same namespace+name — ArgoCD keys an Application by that pair, so one silently overwrites/fights the other |
 | `malformed-ignore-diff-pointer` | warning | an `ignoreDifferences` `jsonPointers` entry doesn't start with `/` (RFC 6901) — it matches nothing, so the field isn't actually ignored |
-| `unknown-sync-option` | warning | a `syncOptions` entry doesn't match any ArgoCD-recognized key (case-sensitive) — likely a typo, silently ignored instead of erroring |
+| `unknown-sync-option` | warning | a `syncOptions` entry (Application-level or the per-resource `sync-options` annotation) doesn't match any ArgoCD-recognized key (case-sensitive) — likely a typo, silently ignored instead of erroring |
+| `unknown-resource-hook` | warning | an `argocd.argoproj.io/hook`/`hook-delete-policy` annotation value doesn't match any ArgoCD-recognized value — likely a typo, silently falls through instead of erroring |
 
 Sample run, table output (the default):
 
@@ -74,7 +75,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>unknown-sync-option"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>unknown-sync-option, unknown-resource-hook"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -155,6 +156,7 @@ rules:
   duplicate-application-name: error
   malformed-ignore-diff-pointer: warning
   unknown-sync-option: warning
+  unknown-resource-hook: warning
 
 unverifiable_blocks_ci: true
 
@@ -162,8 +164,8 @@ exclude_paths:
   - manifests/legacy/**
 
 # Additional operator signatures, on top of the built-in pack
-# (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi) — never a
-# replacement.
+# (CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi, Zalando
+# Postgres Operator) — never a replacement.
 known_operators:
   - crd_trigger: my-operator.io/MyCRD
     name_from: metadata.name
@@ -193,7 +195,7 @@ accept the current state again (it overwrites the file outright).
 ### GitHub Actions
 
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.17
+- uses: gillesl-dev/argocd-source-lint@v0.1.18
   with:
     path: .
 ```
@@ -202,7 +204,7 @@ accept the current state again (it overwrites the file outright).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.17
+  - component: $CI_SERVER_FQDN/<namespace>/argocd-source-lint/lint@v0.1.18
     inputs:
       scope: manifests/
 ```
@@ -212,7 +214,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.17
+    rev: v0.1.18
     hooks:
       - id: argocd-source-lint
 ```

@@ -58,6 +58,13 @@ class KnownOperatorSignature(BaseModel):
 
     crd_trigger: str
     name_from: str
+    # Optional dotted path to a mapping (e.g. a Zalando `postgresql`
+    # resource's `spec.users`) -- when set, `expect_ignore_on` is
+    # evaluated once per key of that mapping, with `{user}` bound to the
+    # key and `{name}` still bound to `name_from` (see DESIGN.md
+    # "known_operators: name_from_each"). `None` keeps the original
+    # single-name behavior (`{name}` only), unaffected.
+    name_from_each: str | None = None
     expect_ignore_on: list[ExpectedIgnoreDiff]
 
 

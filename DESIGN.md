@@ -483,11 +483,46 @@ too would risk a false positive on a legitimate but less-common
 combination — the same "don't guess" principle as
 `malformed-ignore-diff-pointer` restricting itself to the one
 unambiguous RFC 6901 rule (a leading `/`) rather than every possible
-way a pointer could be semantically wrong. Per-resource
-`argocd.argoproj.io/sync-options` annotations (a related but distinct,
-smaller key set, e.g. `Force=true`) aren't covered — out of scope for
-now, nothing currently scans arbitrary resource annotations the way
-`missing-ignore-diff`/`hpa-selfheal-conflict` scan for specific kinds.
+way a pointer could be semantically wrong.
+
+The per-resource `argocd.argoproj.io/sync-options` annotation is a
+related but genuinely distinct, smaller key set (confirmed against the
+same docs) — `Force` only exists here, while `ApplyOutOfSyncOnly`/
+`RespectIgnoreDifferences`/`CreateNamespace`/`FailOnSharedResource`/
+`ClientSideApplyMigration`/`PrunePropagationPolicy` are
+Application-level-only concepts that don't apply to a single resource.
+This rule checks both: the Application-level list directly, and the
+per-resource annotation by scanning every covered document the same
+way `missing-ignore-diff`/`hpa-selfheal-conflict` already do — a key
+that's valid at one level but not the other (e.g.
+`RespectIgnoreDifferences=true` on a single resource) is still flagged,
+since it's just as much a no-op there.
+
+## `unknown-resource-hook`
+
+`argocd.argoproj.io/hook` and `argocd.argoproj.io/hook-delete-policy`
+are read by the controller as plain annotation strings — like
+`sync-options`/`sync-wave`, there's no schema enforcing their value
+against a closed set. A misspelled value (`presync`, `HookSuceeded`)
+most likely falls through silently: the resource is just treated as a
+normal, non-hook resource, or as a hook with no delete policy at all,
+applied and left in place with everything else rather than erroring.
+
+Both annotations accept a comma-separated list, same convention as
+`sync-options`. The valid values (confirmed against the official
+sync-waves docs, not assumed) are `PreSync`/`Sync`/`Skip`/`PostSync`/
+`SyncFail`/`PreDelete`/`PostDelete` for `hook`, and `HookSucceeded`/
+`HookFailed`/`BeforeHookCreation` for `hook-delete-policy`.
+
+Slightly lower confidence than `unknown-sync-option`, worth calling out
+explicitly rather than glossing over: the sync-options docs state in so
+many words that an unrecognized option has no effect, but the
+sync-waves docs merely *list* the valid hook values without spelling
+out what happens to an invalid one. The silent-fallthrough behavior
+here is inferred from the same architecture (annotations are unvalidated
+strings, consistently confirmed for every other case checked this way),
+not quoted directly — hence `unknown-resource-hook` staying ranked
+behind `unknown-sync-option` when this was prioritized.
 
 ## Extension points
 
@@ -498,7 +533,19 @@ now, nothing currently scans arbitrary resource annotations the way
   without touching the rules or reporters.
 - `rules/known-operators.yaml` is a data-driven pack for
   `missing-ignore-diff`: adding an operator signature is a YAML change,
-  never a code change (see `CONTRIBUTING.md`).
+  never a code change (see `CONTRIBUTING.md`). Most operators derive a
+  single resource name from a single scalar field (`metadata.name`,
+  `spec.secretName`) — `name_from_each` is the escape hatch for the
+  minority that don't: Zalando's `postgresql` CRD generates one Secret
+  *per entry* of `spec.users` (`{username}.{clustername}.credentials.postgresql.acid.zalan.do`,
+  confirmed against the operator's own docs), so `name_from_each:
+  spec.users` iterates that mapping's keys as `{user}`, alongside the
+  usual `{name}` from `name_from`. MariaDB Operator's root/user
+  passwords were considered too, and dropped: their Secret name is a
+  free-form field the user themselves sets on the CR
+  (`rootPasswordSecretKeyRef.name`), not something the operator derives
+  from `metadata.name` — nothing here to encode as a signature without
+  guessing at a name that doesn't actually follow a fixed convention.
 - A Flux adapter (`Kustomization`/`HelmRelease`, with its own broken-ref
   pattern via `valuesFrom`/`postBuild.substituteFrom`) is a natural
   candidate once the ArgoCD-specific v1 has stabilized.

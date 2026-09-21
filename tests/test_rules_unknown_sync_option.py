@@ -133,3 +133,85 @@ def test_unknown_bare_entry_without_equals_sign_is_flagged(git_repo):
 
     assert len(findings) == 1
     assert "AutoPrune" in findings[0].message
+
+
+_PLAIN_APP = """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: manifests/web
+"""
+
+
+def test_resource_level_unknown_key_is_flagged(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/web.yaml": _PLAIN_APP,
+            "manifests/web/job.yaml": """\
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    argocd.argoproj.io/sync-options: forceApply=true
+""",
+        }
+    )
+
+    findings = _run_rule(repo_root)
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.rule_id == "unknown-sync-option"
+    assert "forceApply=true" in finding.message
+    assert "Job" in finding.message
+    assert "migrate" in finding.message
+
+
+def test_resource_level_known_keys_are_not_flagged(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/web.yaml": _PLAIN_APP,
+            "manifests/web/job.yaml": """\
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    argocd.argoproj.io/sync-options: Force=true,ServerSideApply=true
+""",
+        }
+    )
+
+    findings = _run_rule(repo_root)
+
+    assert findings == []
+
+
+def test_resource_level_key_only_valid_at_application_level_is_flagged(git_repo):
+    """`RespectIgnoreDifferences` is a real ArgoCD sync option key, but
+    only at the Application level -- it doesn't exist in the smaller
+    per-resource annotation key set, so it's still a no-op there."""
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/web.yaml": _PLAIN_APP,
+            "manifests/web/job.yaml": """\
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    argocd.argoproj.io/sync-options: RespectIgnoreDifferences=true
+""",
+        }
+    )
+
+    findings = _run_rule(repo_root)
+
+    assert len(findings) == 1
+    assert "RespectIgnoreDifferences=true" in findings[0].message

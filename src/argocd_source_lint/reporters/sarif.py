@@ -42,8 +42,14 @@ _RULES_METADATA = {
         "it matches nothing, so the field isn't actually ignored."
     ),
     "unknown-sync-option": (
-        "A syncOptions entry doesn't match any ArgoCD-recognized key -- likely a typo, "
+        "A syncOptions entry (Application-level or the per-resource sync-options "
+        "annotation) doesn't match any ArgoCD-recognized key -- likely a typo, "
         "silently ignored instead of erroring."
+    ),
+    "unknown-resource-hook": (
+        "An argocd.argoproj.io/hook or hook-delete-policy annotation value doesn't "
+        "match any ArgoCD-recognized value -- likely a typo, silently falls through "
+        "instead of erroring."
     ),
 }
 

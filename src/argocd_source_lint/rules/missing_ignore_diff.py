@@ -66,26 +66,66 @@ def _check_document(
         resolved_name = _resolve_path(doc, signature.name_from)
         if not resolved_name:
             continue
-        for expected in signature.expect_ignore_on:
-            resource_name = expected.name_pattern.format(name=resolved_name)
-            if _has_matching_ignore_diff(app, expected.kind, resource_name, resource_namespace):
-                continue
-            findings.append(
-                Finding(
-                    rule_id=RULE_ID,
-                    severity=severity,
-                    application=app.name,
-                    message=(
-                        f"selfHeal active and `{signature.crd_trigger}` `{resolved_name}` "
-                        f"detected, but no `ignoreDifferences` covers "
-                        f"`{expected.kind}` `{resource_name}` — ArgoCD risks resetting "
-                        "this out-of-Git-managed field on every sync."
-                    ),
-                    file=app.source_file,
-                    line=app.self_heal_line,
-                )
+
+        for context in _resolve_contexts(doc, signature, resolved_name):
+            findings.extend(
+                _check_expectations(app, signature, context, resource_namespace, severity)
             )
     return findings
+
+
+def _resolve_contexts(
+    doc: dict[str, Any], signature: KnownOperatorSignature, resolved_name: str
+) -> list[dict[str, str]]:
+    """One `str.format()` kwargs dict per resource to check -- a single
+    `{"name": resolved_name}` for a plain signature, or one per key of
+    the `name_from_each` mapping (e.g. a Zalando `postgresql` resource's
+    `spec.users`, each becoming `{user}` alongside `{name}`) when set.
+    An empty/missing mapping yields no contexts at all -- never guessed
+    at, same principle as everywhere else in this rule."""
+    if signature.name_from_each is None:
+        return [{"name": resolved_name}]
+
+    mapping = _resolve_value(doc, signature.name_from_each)
+    if not isinstance(mapping, dict):
+        return []
+    return [{"name": resolved_name, "user": str(user)} for user in mapping]
+
+
+def _check_expectations(
+    app: Application,
+    signature: KnownOperatorSignature,
+    context: dict[str, str],
+    resource_namespace: str | None,
+    severity: Severity,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for expected in signature.expect_ignore_on:
+        resource_name = expected.name_pattern.format(**context)
+        if _has_matching_ignore_diff(app, expected.kind, resource_name, resource_namespace):
+            continue
+        findings.append(
+            Finding(
+                rule_id=RULE_ID,
+                severity=severity,
+                application=app.name,
+                message=(
+                    f"selfHeal active and {_describe_trigger(signature.crd_trigger, context)} "
+                    f"detected, but no `ignoreDifferences` covers `{expected.kind}` "
+                    f"`{resource_name}` — ArgoCD risks resetting this out-of-Git-managed "
+                    "field on every sync."
+                ),
+                file=app.source_file,
+                line=app.self_heal_line,
+            )
+        )
+    return findings
+
+
+def _describe_trigger(crd_trigger: str, context: dict[str, str]) -> str:
+    if "user" in context:
+        return f"`{crd_trigger}` `{context['name']}` user `{context['user']}`"
+    return f"`{crd_trigger}` `{context['name']}`"
 
 
 def _group_kind(doc: dict[str, Any]) -> str | None:
@@ -98,12 +138,17 @@ def _group_kind(doc: dict[str, Any]) -> str | None:
 
 
 def _resolve_path(doc: dict[str, Any], dotted_path: str) -> str | None:
+    value = _resolve_value(doc, dotted_path)
+    return value if isinstance(value, str) else None
+
+
+def _resolve_value(doc: dict[str, Any], dotted_path: str) -> Any:
     value: Any = doc
     for part in dotted_path.split("."):
         if not isinstance(value, dict) or part not in value:
             return None
         value = value[part]
-    return value if isinstance(value, str) else None
+    return value
 
 
 def _has_matching_ignore_diff(

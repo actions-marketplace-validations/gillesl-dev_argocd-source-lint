@@ -74,6 +74,7 @@ def test_sarif_structure_and_severity_mapping():
         "duplicate-application-name",
         "malformed-ignore-diff-pointer",
         "unknown-sync-option",
+        "unknown-resource-hook",
     }
 
     results = run["results"]

@@ -472,3 +472,110 @@ metadata:
     assert findings[0].message.endswith(
         "`Secret` `bob` — ArgoCD risks resetting this out-of-Git-managed field on every sync."
     )
+
+
+def test_zalando_postgresql_flags_one_secret_per_user(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/pg-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pg-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/postgres
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/postgres/cluster.yaml": """\
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: acid-minimal-cluster
+spec:
+  users:
+    zalando: []
+    foo_user: []
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert len(findings) == 2
+    messages = {f.message for f in findings}
+    assert any("zalando.acid-minimal-cluster.credentials" in m for m in messages)
+    assert any("foo_user.acid-minimal-cluster.credentials" in m for m in messages)
+    assert all("user `zalando`" in m or "user `foo_user`" in m for m in messages)
+
+
+def test_zalando_postgresql_with_matching_ignore_diff_per_user_suppresses_finding(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/pg-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pg-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/postgres
+  syncPolicy:
+    automated:
+      selfHeal: true
+  ignoreDifferences:
+    - kind: Secret
+      name: zalando.acid-minimal-cluster.credentials.postgresql.acid.zalan.do
+""",
+            "infrastructure/postgres/cluster.yaml": """\
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: acid-minimal-cluster
+spec:
+  users:
+    zalando: []
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert findings == []
+
+
+def test_zalando_postgresql_without_users_mapping_produces_no_finding(git_repo):
+    repo_root = git_repo(
+        {
+            "bootstrap/argocd-apps/pg-app.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pg-app
+spec:
+  source:
+    repoURL: https://example.invalid/repo.git
+    targetRevision: HEAD
+    path: infrastructure/postgres
+  syncPolicy:
+    automated:
+      selfHeal: true
+""",
+            "infrastructure/postgres/cluster.yaml": """\
+apiVersion: acid.zalan.do/v1
+kind: postgresql
+metadata:
+  name: acid-minimal-cluster
+""",
+        }
+    )
+
+    findings = _run_missing_ignore_diff(repo_root)
+
+    assert findings == []

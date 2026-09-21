@@ -21,6 +21,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "duplicate-application-name": Severity.ERROR,
     "malformed-ignore-diff-pointer": Severity.WARNING,
     "unknown-sync-option": Severity.WARNING,
+    "unknown-resource-hook": Severity.WARNING,
 }
 
 

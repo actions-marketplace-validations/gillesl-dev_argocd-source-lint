@@ -19,6 +19,7 @@ rules:
   duplicate-application-name: error
   malformed-ignore-diff-pointer: warning
   unknown-sync-option: warning
+  unknown-resource-hook: warning
 
 # Default: true (fail-closed). Only set to false knowingly if the team
 # accepts running on an incomplete shallow clone in CI.
