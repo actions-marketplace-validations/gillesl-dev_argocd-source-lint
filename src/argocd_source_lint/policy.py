@@ -20,6 +20,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "sync-validation-disabled": Severity.INFO,
     "duplicate-application-name": Severity.ERROR,
     "malformed-ignore-diff-pointer": Severity.WARNING,
+    "unknown-sync-option": Severity.WARNING,
 }
 
 

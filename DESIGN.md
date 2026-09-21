@@ -457,6 +457,38 @@ and most of the community-reported `jqPathExpressions` problems turn out
 to be ArgoCD-side behavior quirks that vary by version rather than
 authoring mistakes a static check could catch reliably.
 
+## `unknown-sync-option`
+
+`spec.syncPolicy.syncOptions` entries are matched by ArgoCD as literal
+`Key=Value` strings — there's no schema validation on the key or the
+value, so a wrong case (`respectIgnoreDifferences=true` instead of
+`RespectIgnoreDifferences=true`) or a misspelled key
+(`PruneLatest=true`) is never rejected. It's just never recognized
+either, so the option has zero effect: exactly the same silent-no-op
+shape `hpa-selfheal-conflict` already relies on for
+`RespectIgnoreDifferences` specifically, generalized to the entire
+option set.
+
+The [official sync-options docs](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/)
+document a closed, exact list of 13 keys (confirmed there, not assumed):
+`Prune`, `Validate`, `SkipDryRunOnMissingResource`, `Delete`,
+`ApplyOutOfSyncOnly`, `PrunePropagationPolicy`, `PruneLast`, `Replace`,
+`ServerSideApply`, `ClientSideApplyMigration`, `FailOnSharedResource`,
+`RespectIgnoreDifferences`, `CreateNamespace` — all PascalCase. Only the
+**key** portion (before `=`) is checked against that set, deliberately
+not the value: the exact accepted values/casing per key (`=true` only?
+`=false` too? `=confirm`? `PrunePropagationPolicy`'s three enum values)
+aren't consistently documented across every key, so validating values
+too would risk a false positive on a legitimate but less-common
+combination — the same "don't guess" principle as
+`malformed-ignore-diff-pointer` restricting itself to the one
+unambiguous RFC 6901 rule (a leading `/`) rather than every possible
+way a pointer could be semantically wrong. Per-resource
+`argocd.argoproj.io/sync-options` annotations (a related but distinct,
+smaller key set, e.g. `Force=true`) aren't covered — out of scope for
+now, nothing currently scans arbitrary resource annotations the way
+`missing-ignore-diff`/`hpa-selfheal-conflict` scan for specific kinds.
+
 ## Extension points
 
 - `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —

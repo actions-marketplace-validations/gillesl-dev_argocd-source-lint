@@ -73,6 +73,7 @@ def test_sarif_structure_and_severity_mapping():
         "sync-validation-disabled",
         "duplicate-application-name",
         "malformed-ignore-diff-pointer",
+        "unknown-sync-option",
     }
 
     results = run["results"]

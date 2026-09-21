@@ -41,6 +41,10 @@ _RULES_METADATA = {
         "An ignoreDifferences jsonPointers entry doesn't start with / (RFC 6901) -- "
         "it matches nothing, so the field isn't actually ignored."
     ),
+    "unknown-sync-option": (
+        "A syncOptions entry doesn't match any ArgoCD-recognized key -- likely a typo, "
+        "silently ignored instead of erroring."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {
