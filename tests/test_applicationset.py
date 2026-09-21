@@ -784,6 +784,111 @@ spec:
     assert "clusters" in findings[0].message
 
 
+def test_matrix_generator_with_a_git_child_honors_its_pinned_revision(
+    git_repo, git_tag, git_commit
+):
+    """Every existing matrix/merge test combines `list` generators only
+    -- nesting never exercised a `git` child's own revision handling
+    (fixed in isolation for a bare `git` generator; this checks the fix
+    actually reaches it through `_resolve_matrix`'s recursive dispatch,
+    not just when `git` is the top-level generator)."""
+    repo_root = git_repo(
+        {
+            "apps/old/deployment.yaml": "kind: Deployment\n",
+            "bootstrap/appsets/matrix-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: matrix-appset
+spec:
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://example.invalid/repo.git
+              revision: v1.0
+              directories:
+                - path: apps/*
+          - list:
+              elements:
+                - region: eu
+                - region: us
+  template:
+    metadata:
+      name: '{{path.basename}}-{{region}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: '{{path}}'
+""",
+        }
+    )
+    git_tag(repo_root, "v1.0")
+    # HEAD now has `apps/new`, not `apps/old` -- a matrix nested `git`
+    # child reading the working tree instead of its own pinned
+    # `revision` would generate `new-eu`/`new-us` instead.
+    git_commit(
+        repo_root,
+        {"apps/old/deployment.yaml": None, "apps/new/deployment.yaml": "kind: Deployment\n"},
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    assert {app.name for app in applications} == {"old-eu", "old-us"}
+
+
+def test_merge_generator_with_a_git_base_and_a_list_override(git_repo):
+    """Every existing merge test uses `list` for both the base and the
+    override -- this checks merge-by-key still works when the base
+    comes from a `git` generator's discovered params instead."""
+    repo_root = git_repo(
+        {
+            "clusters/dev.json": '{"cluster": {"name": "dev"}}',
+            "clusters/prod.json": '{"cluster": {"name": "prod"}}',
+            "bootstrap/appsets/merge-appset.yaml": """\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: merge-appset
+spec:
+  generators:
+    - merge:
+        mergeKeys:
+          - cluster.name
+        generators:
+          - git:
+              repoURL: https://example.invalid/repo.git
+              revision: HEAD
+              files:
+                - path: clusters/*.json
+          - list:
+              elements:
+                - cluster.name: prod
+                  tier: critical
+  template:
+    metadata:
+      name: 'app-{{cluster.name}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: 'manifests/{{cluster.name}}'
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert findings == []
+    by_name = {app.name: app for app in applications}
+    assert set(by_name) == {"app-dev", "app-prod"}
+    # The override only matches the "prod" base entry by mergeKeys.
+    assert by_name["app-prod"].sources[0].path == "manifests/prod"
+    assert by_name["app-dev"].sources[0].path == "manifests/dev"
+
+
 def test_generated_application_is_checked_by_existing_rules(git_repo):
     """The whole point: a generated Application is a plain `Application`
     from the rules' point of view — no special-casing needed in
