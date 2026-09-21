@@ -57,6 +57,7 @@ def test_json_report_round_trips_all_fields():
 def test_sarif_structure_and_severity_mapping():
     payload = json.loads(sarif.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
 
+    assert payload["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
     assert payload["version"] == "2.1.0"
     run = payload["runs"][0]
     rule_ids = {rule["id"] for rule in run["tool"]["driver"]["rules"]}
@@ -84,6 +85,30 @@ def test_sarif_structure_and_severity_mapping():
     assert error_result["level"] == "error"
     warning_result = next(r for r in results if r["ruleId"] == "phantom-target")
     assert warning_result["level"] == "warning"
+
+
+def test_sarif_rules_have_recommended_metadata():
+    payload = json.loads(sarif.render_findings([]))
+
+    rules = {rule["id"]: rule for rule in payload["runs"][0]["tool"]["driver"]["rules"]}
+    orphan_source = rules["orphan-source"]
+    assert orphan_source["fullDescription"]["text"]
+    assert orphan_source["helpUri"].startswith("https://github.com/gillesl-dev/argocd-source-lint")
+    assert orphan_source["defaultConfiguration"]["level"] == "error"
+
+    # unresolvable-generator defaults to info -> SARIF "note".
+    assert rules["unresolvable-generator"]["defaultConfiguration"]["level"] == "note"
+
+
+def test_sarif_results_carry_a_stable_fingerprint():
+    payload = json.loads(sarif.render_findings([_FINDING_NO_LINE]))
+
+    fingerprints = payload["runs"][0]["results"][0]["partialFingerprints"]
+    assert fingerprints["primaryLocationLineHash"]
+
+    replay = json.loads(sarif.render_findings([_FINDING_NO_LINE]))
+    replay_fingerprints = replay["runs"][0]["results"][0]["partialFingerprints"]
+    assert replay_fingerprints["primaryLocationLineHash"] == fingerprints["primaryLocationLineHash"]
 
 
 def test_sarif_omits_region_when_line_is_none():
@@ -176,6 +201,31 @@ def test_junit_is_valid_empty_suite_when_no_findings():
     testsuite = root.find("testsuite")
     assert testsuite.get("tests") == "0"
     assert testsuite.findall("testcase") == []
+
+
+def test_junit_disambiguates_duplicate_testcase_names():
+    """GitLab's own JUnit parser silently drops every testcase after the
+    first sharing the same name -- two different findings (different
+    file/Application) can share the exact same message."""
+    first = Finding(
+        rule_id="unknown-resource-hook",
+        severity=Severity.WARNING,
+        application="app-a",
+        message="`argocd.argoproj.io/hook: PreSyncc` on `ConfigMap` `shared-name` doesn't match",
+        file=Path("bootstrap/argocd-apps/app-a.yaml"),
+    )
+    second = Finding(
+        rule_id="unknown-resource-hook",
+        severity=Severity.WARNING,
+        application="app-b",
+        message="`argocd.argoproj.io/hook: PreSyncc` on `ConfigMap` `shared-name` doesn't match",
+        file=Path("bootstrap/argocd-apps/app-b.yaml"),
+    )
+
+    root = ET.fromstring(junit.render_findings([first, second]))
+
+    names = {tc.get("name") for tc in root.find("testsuite").findall("testcase")}
+    assert len(names) == 2  # both stayed distinguishable, neither would be dropped by GitLab
 
 
 def test_gitlab_codequality_fingerprint_is_stable_and_unique():

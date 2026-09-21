@@ -70,6 +70,41 @@ CodeClimate-derived format instead (`severity: info|minor|major|critical`,
 `fingerprint`, `location.lines.begin`) — hence two separate reporters
 rather than one shared SARIF-based implementation.
 
+## Keeping the reporters aligned with each format's real-world conventions
+
+An audit against each format's own current documentation (not the state
+they were originally written against) turned up three gaps:
+
+- SARIF's `$schema` pointed at
+  `raw.githubusercontent.com/oasis-tcs/sarif-spec/master/...` — the spec
+  repo's mutable `master` branch, not a stable release. GitHub's own docs
+  recommend `https://json.schemastore.org/sarif-2.1.0.json` instead.
+- SARIF results had no `partialFingerprints` — GitHub's code scanning
+  docs call this "essential" for matching the same finding across runs;
+  without it, an unrelated change anywhere in the run can make GitHub
+  treat every finding as a brand-new alert instead of the same one
+  persisting. `reporters/fingerprint.py` (`stable_fingerprint`) is now
+  shared between SARIF's `partialFingerprints.primaryLocationLineHash`
+  and GitLab Code Quality's `fingerprint` — same stability requirement
+  (content-based: rule + file + application + message, not list
+  position), previously implemented independently in
+  `gitlab_codequality.py` alone. Rules also gained `fullDescription`,
+  `helpUri` (the README's rule table) and `defaultConfiguration.level`
+  (from `policy.DEFAULT_RULE_SEVERITIES`) — all recommended fields
+  GitHub's UI uses for filtering/detail pages, previously omitted.
+- GitLab's own JUnit docs state a hard gotcha: "If you have duplicate
+  test names, only the first test is used and others with the same name
+  are ignored" — silent data loss, not a rendering quirk. The JUnit
+  reporter's `<testcase name=...>` was the finding's raw message, and
+  two *different* findings (different file/Application) can share that
+  message verbatim (e.g. the same copy-pasted typo in two Applications'
+  manifests). `junit.py` now appends `(#N)` on an exact repeat within one
+  render so every finding stays visible in GitLab's parsed report.
+
+GitLab Code Quality itself needed no change: `description`, `check_name`,
+`fingerprint`, `severity`, `location.path`, `location.lines.begin` are
+exactly the fields GitLab's own docs say it actually processes.
+
 ## The JUnit reporter's severity mapping
 
 JUnit XML (`reporters/junit.py`) has no native "warning"/"info" level —

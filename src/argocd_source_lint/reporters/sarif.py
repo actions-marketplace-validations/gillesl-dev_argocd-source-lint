@@ -4,8 +4,11 @@ import json
 
 from argocd_source_lint import tool_version
 from argocd_source_lint.models import Finding, Severity
+from argocd_source_lint.policy import DEFAULT_RULE_SEVERITIES
+from argocd_source_lint.reporters.fingerprint import stable_fingerprint
 
 _INFORMATION_URI = "https://github.com/gillesl-dev/argocd-source-lint"
+_HELP_URI = f"{_INFORMATION_URI}#what-the-tool-does"
 
 _RULES_METADATA = {
     "orphan-source": "Manifest present in the repo but not covered by any declared source.",
@@ -67,7 +70,7 @@ _LEVEL_BY_SEVERITY = {
 
 def render_findings(findings: list[Finding]) -> str:
     payload = {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [
             {
@@ -77,10 +80,7 @@ def render_findings(findings: list[Finding]) -> str:
                         "informationUri": _INFORMATION_URI,
                         "version": tool_version(),
                         "rules": [
-                            {
-                                "id": rule_id,
-                                "shortDescription": {"text": description},
-                            }
+                            _rule(rule_id, description)
                             for rule_id, description in _RULES_METADATA.items()
                         ],
                     }
@@ -90,6 +90,16 @@ def render_findings(findings: list[Finding]) -> str:
         ],
     }
     return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def _rule(rule_id: str, description: str) -> dict:
+    return {
+        "id": rule_id,
+        "shortDescription": {"text": description},
+        "fullDescription": {"text": description},
+        "helpUri": _HELP_URI,
+        "defaultConfiguration": {"level": _LEVEL_BY_SEVERITY[DEFAULT_RULE_SEVERITIES[rule_id]]},
+    }
 
 
 def _result(finding: Finding) -> dict:
@@ -102,4 +112,9 @@ def _result(finding: Finding) -> dict:
         "level": _LEVEL_BY_SEVERITY[finding.severity],
         "message": {"text": finding.message},
         "locations": [{"physicalLocation": physical_location}],
+        # Lets GitHub recognize "the same" finding across runs instead of
+        # treating every run's findings as new alerts on the Security tab
+        # (see https://docs.github.com/en/code-security/code-scanning/...
+        # -sarif-support-for-code-scanning#partialfingerprints-object).
+        "partialFingerprints": {"primaryLocationLineHash": stable_fingerprint(finding)},
     }

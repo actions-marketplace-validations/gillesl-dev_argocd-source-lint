@@ -27,8 +27,9 @@ def render_findings(findings: list[Finding]) -> str:
         "time": "0",
     }
     testsuite = ET.Element("testsuite", attrs)
+    seen: dict[tuple[str, str], int] = {}
     for finding in findings:
-        testsuite.append(_testcase(finding))
+        testsuite.append(_testcase(finding, seen))
 
     testsuites = ET.Element("testsuites", attrs)
     testsuites.append(testsuite)
@@ -36,10 +37,20 @@ def render_findings(findings: list[Finding]) -> str:
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(testsuites, encoding="unicode")
 
 
-def _testcase(finding: Finding) -> ET.Element:
+def _testcase(finding: Finding, seen: dict[tuple[str, str], int]) -> ET.Element:
+    # GitLab's own JUnit parser silently drops every testcase after the
+    # first one sharing the same name -- and `name` here is the finding's
+    # message, which two *different* findings (different file/Application)
+    # can share verbatim (e.g. the same copy-pasted typo in two repos'
+    # worth of manifests). A suffix on the repeat keeps every finding
+    # visible instead of one silently vanishing from the report.
+    key = (finding.rule_id, finding.message)
+    seen[key] = seen.get(key, 0) + 1
+    name = finding.message if seen[key] == 1 else f"{finding.message} (#{seen[key]})"
+
     attrs = {
         "classname": finding.rule_id,
-        "name": finding.message,
+        "name": name,
         "file": finding.file.as_posix(),
         "time": "0",
     }

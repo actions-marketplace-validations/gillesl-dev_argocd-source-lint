@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
 
 from argocd_source_lint.models import Finding, Severity
+from argocd_source_lint.reporters.fingerprint import stable_fingerprint
 
 # GitLab's "Code Quality" format (derived from CodeClimate) — NOT SARIF.
 # Confirmed against the official GitLab docs before implementing: SARIF
@@ -27,17 +27,10 @@ def _issue(finding: Finding) -> dict:
     return {
         "description": finding.message,
         "check_name": finding.rule_id,
-        "fingerprint": _fingerprint(finding),
+        "fingerprint": stable_fingerprint(finding),
         "severity": _SEVERITY_BY_SEVERITY[finding.severity],
         "location": {
             "path": path,
             "lines": {"begin": line},
         },
     }
-
-
-def _fingerprint(finding: Finding) -> str:
-    identity = (
-        f"{finding.rule_id}|{finding.file.as_posix()}|{finding.application}|{finding.message}"
-    )
-    return hashlib.md5(identity.encode("utf-8")).hexdigest()
