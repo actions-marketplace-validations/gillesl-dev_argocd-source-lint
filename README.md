@@ -200,10 +200,23 @@ accept the current state again (it overwrites the file outright).
 
 ### GitHub Actions
 
+The action uploads its SARIF report via `github/codeql-action/upload-sarif`,
+which needs its own permissions on the job — GitHub won't grant them to a
+composite action automatically:
+
 ```yaml
-- uses: gillesl-dev/argocd-source-lint@v0.1.22
-  with:
-    path: .
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # required for upload-sarif
+      actions: read # private repos only
+      contents: read # private repos only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gillesl-dev/argocd-source-lint@v0.1.22
+        with:
+          path: .
 ```
 
 ### GitLab CI

@@ -12,6 +12,12 @@ All notable changes to this project are documented in this file, in
   never from PyPI, so it already works today) and omitted the GitLab CI
   component (which does `pip install` from the real PyPI index, and is
   genuinely affected).
+- README's GitHub Actions example was missing `actions/checkout` —
+  without it there's nothing for the action to analyze, and it silently
+  "succeeds" with zero findings instead of erroring — and the
+  `permissions: security-events: write` (`actions`/`contents: read` on
+  private repos) the composite action's `upload-sarif` step needs, which
+  GitHub never grants automatically to a composite action.
 
 ## [0.1.22] - 2026-09-21
 
