@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [1.0.0] - 2026-09-22
+
+### Changed
+
+- Version bumped to `1.0.0`, marking the public v1 launch (real PyPI +
+  GitHub Marketplace). No functional change from `0.1.36` — every rule,
+  reporter, and the two security-audit rounds behind it are unchanged;
+  this is the version/metadata declaration that milestone was gated on.
+  PyPI classifier updated from `Development Status :: 3 - Alpha` to
+  `5 - Production/Stable`.
+
 ## [0.1.36] - 2026-09-22
 
 ### Security

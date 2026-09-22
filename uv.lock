@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "argocd-source-lint"
-version = "0.1.36"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

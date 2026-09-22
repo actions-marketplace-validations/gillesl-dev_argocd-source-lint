@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/github/license/gillesl-dev/argocd-source-lint)](./LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#)
+[![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen)](#)
 
 Static linter to detect silent failures in multi-source ArgoCD
 `Application` resources: resources never synced, broken `$values`,
@@ -114,7 +114,7 @@ checkout. Each rule is listed in full in the [table above](#what-the-tool-does).
 pip install argocd-source-lint
 ```
 
-> Currently published to TestPyPI only, pending v1.0.0 (see
+> Currently published to TestPyPI only, not yet the real PyPI index (see
 > [Development](#development) for the TestPyPI install command). The
 > [GitHub Action](#github-actions) and [GitLab CI](#gitlab-ci) component
 > below both `pip install` from the real PyPI index and will start
@@ -217,7 +217,7 @@ jobs:
       contents: read # private repos only
     steps:
       - uses: actions/checkout@v4
-      - uses: gillesl-dev/argocd-source-lint@v0.1.36
+      - uses: gillesl-dev/argocd-source-lint@v1.0.0
         with:
           path: .
 ```
@@ -236,7 +236,7 @@ ref works after that (a tag, a branch, a commit SHA); replace
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.36
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v1.0.0
     inputs:
       scope: manifests/
 ```
@@ -246,7 +246,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.36
+    rev: v1.0.0
     hooks:
       - id: argocd-source-lint
 ```
