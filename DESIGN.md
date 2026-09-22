@@ -409,6 +409,45 @@ module under `rules/` (`pkgutil.iter_modules`, since a rule nobody
 already imports would otherwise stay invisible to
 `Rule.__subclasses__()`) and asserts the two sets match.
 
+## A `targetRevision` can turn into a live network call
+
+Every `revision` string this tool ever shells out to `git` with comes
+from repo-controlled YAML — a source's `targetRevision`, or an
+ApplicationSet `git` generator's own `revision` — never something this
+tool chose itself. `git`'s own argument parser doesn't know that: a
+`revision` passed straight through as a positional argument is read as
+a *flag* when it starts with `-`, not as a revision. Confirmed for
+real, not theoretical, and worse than a parse error: `git archive
+"--remote=https://<host>/x"` — exactly `materialize_revision`'s own
+command — spends the full TCP connect timeout actually reaching out to
+`<host>` instead of failing instantly. A crafted `targetRevision` (a
+malicious fork's PR, a compromised dependency repo) could turn this
+into a live SSRF primitive from inside whatever CI job runs the tool —
+directly breaking the "no network access, no credentials" guarantee
+the whole tool is built on and marketed on (see "Mono-repo v1 scope"
+above).
+
+`git_context._is_safe_revision` rejects any `revision` starting with
+`-` before it ever reaches a `git` subprocess call — a real git
+revision (branch, tag, SHA) never starts with `-` in the first place
+(`git check-ref-format` itself disallows it for refs, and a hex SHA
+can't either), so this is a pure safety net, never a legitimate value
+lost. Applied at the top of every function in `git_context.py` that
+shells out with a `revision` (`is_revision_resolvable`,
+`_resolve_commit`, `materialize_revision`, `list_tree_paths`) rather
+than at a single call site: `materialize_revision` in particular has
+only two callers today, both already gated by
+`revision_matches_checkout`, but a function whose failure mode is "makes
+a network call" should be safe on its own terms, not rely on every
+future caller getting the gating right. A rejected revision is treated
+exactly like any other unresolvable one (`False`/`None`/`[]`, the same
+value each function already returns for a shallow-clone-missing
+revision) — no new severity, no new finding shape, just one more path
+into the existing `unverifiable` handling.
+`test_flag_like_revision_is_rejected_without_ever_calling_git` proves
+the guard, not just the parsing: it spies on `subprocess.run` and
+asserts zero calls, rather than trusting a mocked git's exit code.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

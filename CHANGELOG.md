@@ -3,6 +3,27 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.33] - 2026-09-22
+
+### Security
+
+- A `targetRevision` (or an ApplicationSet `git` generator's own
+  `revision`) is repo-controlled YAML, but was passed straight through
+  as a positional argument to `git`. A value like
+  `--remote=https://<host>/x` is read by `git` as a *flag*, not a
+  revision — confirmed for real: `git archive` with that value spends
+  the full TCP connect timeout actually reaching out to `<host>`
+  instead of failing to parse, a live SSRF primitive from inside
+  whatever CI job runs this tool, breaking the "no network access, no
+  credentials" guarantee the tool is built on. Every function in
+  `git_context.py` that shells out with a `revision`
+  (`is_revision_resolvable`, `_resolve_commit`, `materialize_revision`,
+  `list_tree_paths`) now rejects a `-`-prefixed value before it ever
+  reaches a `git` subprocess — a real revision never starts with `-`
+  in the first place, so no legitimate value is affected. A rejected
+  revision is treated exactly like any other unresolvable one, same
+  `unverifiable` handling already in place.
+
 ## [0.1.32] - 2026-09-22
 
 ### Added

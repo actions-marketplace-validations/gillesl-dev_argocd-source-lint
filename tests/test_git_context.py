@@ -9,6 +9,9 @@ from argocd_source_lint.git_context import (
     clear_caches,
     is_git_available,
     is_local_repo_url,
+    is_revision_resolvable,
+    list_tree_paths,
+    materialize_revision,
     normalize_repo_url,
     path_has_tracked_files,
     revision_matches_checkout,
@@ -75,6 +78,30 @@ def test_revision_matches_checkout_false_for_a_diverged_tag(git_repo, git_tag, g
 def test_revision_matches_checkout_none_for_unresolvable_revision(git_repo):
     repo_root = git_repo({"a.txt": "x"})
     assert revision_matches_checkout(repo_root, "does-not-exist-anywhere") is None
+
+
+def test_flag_like_revision_is_rejected_without_ever_calling_git(git_repo):
+    """A `targetRevision` (or an ApplicationSet `git` generator's own
+    `revision`) is repo-controlled YAML, not a value this tool ever
+    chose -- a value like `--remote=<url>` passed straight through to
+    `git archive` is read as a *flag*, not a revision, and git actually
+    reaches out to `<url>` instead of failing to parse. Confirmed for
+    real (manually, not in this test to avoid a slow/flaky network
+    call): `git archive "--remote=https://192.0.2.1/x"` spends the full
+    TCP connect timeout instead of erroring instantly. Every function
+    here must reject a `-`-prefixed revision *before* it ever reaches a
+    `git` subprocess -- asserted here by spying on `subprocess.run`."""
+    repo_root = git_repo({"a.txt": "x"})
+    clear_caches()
+    malicious = "--remote=https://192.0.2.1/x"
+
+    with patch("subprocess.run", wraps=subprocess.run) as spy:
+        assert is_revision_resolvable(repo_root, malicious) is False
+        assert revision_matches_checkout(repo_root, malicious) is None
+        assert materialize_revision(repo_root, malicious) is None
+        assert list_tree_paths(repo_root, malicious, ".") == []
+
+    spy.assert_not_called()
 
 
 def test_resolve_commit_is_cached_across_repeated_calls(git_repo):

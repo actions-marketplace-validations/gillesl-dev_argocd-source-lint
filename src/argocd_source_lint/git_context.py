@@ -14,6 +14,27 @@ from argocd_source_lint.models import Application, Source
 _SCP_LIKE_RE = re.compile(r"^(?:[^@/]+@)?([^:/]+):(.+)$")
 
 
+def _is_safe_revision(revision: str) -> bool:
+    """A real git revision (branch, tag, SHA) never starts with `-` --
+    `git check-ref-format` itself disallows a ref starting with `-`, and
+    a hex SHA can't either. But `revision` here always comes from
+    repo-controlled YAML (a source's `targetRevision`, or an
+    ApplicationSet `git` generator's own `revision`), and git's argument
+    parser doesn't know that: passed straight through as a positional
+    argument, a value like `--remote=<url>` is read as a *flag*, not a
+    revision. Confirmed for real, not theoretical, and worse than a
+    parse error: `git archive "--remote=https://<host>/x"` (exactly
+    `materialize_revision`'s own command below) spends the full connect
+    timeout actually reaching out to `<host>` instead of failing
+    instantly -- a live SSRF primitive from inside whatever CI job runs
+    this tool, breaking the "no network access" guarantee the whole
+    tool is built on (see DESIGN.md "Mono-repo v1 scope"). Every
+    function in this module that shells out with a `revision` argument
+    checks this first and treats a rejected value the same as any other
+    unresolvable revision, never passing it to `git` at all."""
+    return not revision.startswith("-")
+
+
 def is_git_available() -> bool:
     """Every rule that resolves a source ultimately shells out to `git`
     (revision lookups, tree listings, the `targetRevision`-drift
@@ -104,6 +125,8 @@ def is_revision_resolvable(repo_root: Path, revision: str) -> bool:
     a revision not fetched locally must never be treated as "path
     missing" — only as unverifiable. Used by `phantom-target` and
     `broken-values-ref`."""
+    if not _is_safe_revision(revision):
+        return False
     result = subprocess.run(
         ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
         cwd=repo_root,
@@ -128,6 +151,8 @@ def _resolve_commit(repo_root: Path, revision: str) -> str | None:
     # `argocd-source-lint` runs sharing a process only in tests
     # (`CliRunner.invoke` twice against the same mutated repo), never
     # in real usage (one process per run).
+    if not _is_safe_revision(revision):
+        return None
     cache_key = (repo_root, revision)
     if cache_key in _RESOLVED_COMMIT_CACHE:
         return _RESOLVED_COMMIT_CACHE[cache_key]
@@ -184,6 +209,8 @@ def materialize_revision(repo_root: Path, revision: str) -> Path | None:
     doesn't produce a tree (shouldn't happen — callers only reach this
     after `revision_matches_checkout` confirmed it resolves, or
     `is_revision_resolvable` directly)."""
+    if not _is_safe_revision(revision):
+        return None
     cache_key = (repo_root, revision)
     if cache_key in _REVISION_SNAPSHOT_CACHE:
         return _REVISION_SNAPSHOT_CACHE[cache_key]
@@ -213,6 +240,8 @@ def list_tree_paths(repo_root: Path, revision: str, pathspec: str) -> list[str]:
     """File paths under `pathspec` at `revision`. Assumes `revision` is
     already known to be resolvable (`is_revision_resolvable`) — otherwise
     returns an empty list instead of failing loudly."""
+    if not _is_safe_revision(revision):
+        return []
     result = subprocess.run(
         ["git", "ls-tree", "-r", revision, "--name-only", "--", pathspec],
         cwd=repo_root,
