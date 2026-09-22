@@ -37,20 +37,21 @@ _COVERED_FILES_CACHE: dict[tuple[Path, bool, str | None, str | None], tuple[Path
 
 def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]:
     """Files actually covered by a `path` source, aligned with real ArgoCD
-    behavior (`directory.recurse`/`include`/`exclude`, see DESIGN.md). Used
-    by `orphan-source` and `missing-ignore-diff`, and by
-    `covered_files_for_application`/`covered_documents_for_application`
-    below on behalf of the five rules that read an Application's covered
-    content -- each of those independently walks the same source
-    directory, so the result is cached by the only inputs it actually
-    depends on (`source_dir`, plus the three `directory.*` fields that
-    can change what's yielded from the same directory). Confirmed for
-    real: 40 Applications x 15 covered files each, x 3 rules that
-    happened to reach this path in a minimal repro, cost ~4.9s of
-    re-walking before this cache and the sibling one in
-    `fsutil.load_yaml_documents` existed. Same reset story as every
-    other cache here: `clear_caches`, called once at the start of
-    `cli.lint`."""
+    behavior (`directory.recurse`/`include`/`exclude`, see DESIGN.md).
+    Never called directly by a rule -- only through
+    `covered_files_for_application` (`orphan-source`, `double-coverage`)
+    or `covered_documents_for_application` (`missing-ignore-diff`,
+    `hpa-selfheal-conflict`, `unknown-sync-option`, `unknown-resource-hook`,
+    `malformed-sync-wave`) below, seven rules in total -- each of those
+    independently walks the same source directory, so the result is
+    cached by the only inputs it actually depends on (`source_dir`, plus
+    the three `directory.*` fields that can change what's yielded from
+    the same directory). Confirmed for real: 40 Applications x 15
+    covered files each, x 3 rules that happened to reach this path in a
+    minimal repro, cost ~4.9s of re-walking before this cache and the
+    sibling one in `fsutil.load_yaml_documents` existed. Same reset
+    story as every other cache here: `clear_caches`, called once at the
+    start of `cli.lint`."""
     key = (
         source_dir.resolve(),
         source.directory_recurse,

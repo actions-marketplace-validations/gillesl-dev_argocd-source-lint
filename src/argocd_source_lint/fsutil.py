@@ -132,16 +132,20 @@ def load_yaml_documents(path: Path) -> list[dict[str, Any]]:
     returns an empty list instead of raising or hanging.
 
     Cached by resolved path, for the same reason and under the same
-    `clear_caches` reset as `discover_documents` below: `coverage.py`'s
-    per-Application `covered_documents_for_application` re-walks and
-    re-parses that Application's own source directory independently for
-    every rule that reads it (five of them) -- confirmed for real, not
+    `clear_caches` reset as `discover_documents` below: before this
+    cache existed, `coverage.py`'s per-Application
+    `covered_documents_for_application` re-parsed that Application's
+    own source directory independently for every rule that reads it
+    (five of them, plus two more via `covered_files_for_application`'s
+    own use of `covered_files_for_source`) -- confirmed for real, not
     estimated: 40 Applications x 15 covered files each x 3 rules that
     actually reached this path in a minimal repro still cost ~4.9s of
-    pure re-parsing. Caching here (rather than in `coverage.py`) also
-    means a file `discover_documents` already parsed for the top-level
-    Application/ApplicationSet/AppProject scan is never re-parsed again
-    when a rule later reads it as covered content."""
+    pure re-parsing. Caching here (rather than only in `coverage.py`'s
+    own `covered_files_for_source`, which stops the redundant *walk* but
+    not the redundant *parse*) also means a file `discover_documents`
+    already parsed for the top-level Application/ApplicationSet/
+    AppProject scan is never re-parsed again when a rule later reads it
+    as covered content."""
     resolved = path.resolve()
     if resolved in _LOADED_DOCUMENTS_CACHE:
         return _LOADED_DOCUMENTS_CACHE[resolved]
