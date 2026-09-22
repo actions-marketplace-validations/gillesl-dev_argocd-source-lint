@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.35] - 2026-09-22
+
+### Security
+
+- `globs.py`'s `match_glob` (shared by the ApplicationSet `git`
+  generator's `directories`/`files` `path:` and
+  `project-scope-violation`'s `sourceRepos`/`destinations`) translated
+  a glob pattern into a backtracking regex. Confirmed for real: a
+  pattern shaped like `*a*a*a...*a!` (~40 repetitions) against a
+  non-matching candidate of `a`s hung indefinitely — a classic ReDoS,
+  and both the pattern and the candidate are repo-controlled here.
+  `match_glob` now tokenizes the pattern once and runs a
+  dynamic-programming scan over the candidate instead —
+  `O(len(pattern) x len(candidate))` by construction, regardless of how
+  many wildcards the pattern has, rather than relying on an input-size
+  limit that would still be exponential below the limit.
+
 ## [0.1.34] - 2026-09-22
 
 ### Security

@@ -495,6 +495,39 @@ guards the fix itself: a legitimate `../` reference stated inside the
 repo (an overlay referencing a shared base a few levels up — a common,
 real Kustomize pattern) must keep resolving.
 
+## `match_glob`'s regex translation was a ReDoS
+
+Found in the same pre-v1 security audit as the two issues above:
+`globs.py`'s `match_glob` (shared by the ApplicationSet `git`
+generator's `directories`/`files` `path:` and `project-scope-violation`'s
+`sourceRepos`/`destinations`) translated a glob pattern into a regex —
+`re.match("^" + ".*".join(escaped) + "$", candidate)`, each `escaped`
+segment itself containing one `[^/]*` per `*` in that segment. Confirmed
+for real, not theoretical: a pattern shaped like `*a*a*a...*a!` (~40
+repetitions) against a non-matching candidate of `a`s hung indefinitely
+— never returned, had to be killed. A classic ReDoS: Python's `re` is a
+backtracking engine, and a chain of ambiguous wildcard/literal pairs on
+a string that ultimately doesn't match forces it to try exponentially
+many ways of distributing characters among the wildcards before giving
+up. Both the pattern *and* the candidate are repo-controlled here (an
+ApplicationSet generator's own YAML, or an `AppProject`'s own YAML), so
+this isn't a hypothetical adversary — either side of the match is a
+plausible injection point.
+
+Fixed by matching without a regex at all: `match_glob` now tokenizes
+the pattern once (`literal`/`*`/`**`/`?`) and runs a dynamic-programming
+scan over `candidate` — the same "is this string reachable" shape as
+`fsutil.is_within_budget`'s memoized recursion for the YAML alias bomb,
+applied here to reachability over string positions instead of over
+YAML nodes. `O(len(pattern) x len(candidate))` by construction,
+regardless of how many wildcards the pattern has — a bound that holds
+structurally, not one that relies on guessing a safe input-size limit
+(the previous approach's only real alternative, and a much weaker
+guarantee: still exponential below the limit, just a smaller limit).
+`test_a_pattern_that_previously_caused_catastrophic_backtracking_is_fast`
+runs the exact hanging input from the repro and asserts it completes in
+under a second.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually
