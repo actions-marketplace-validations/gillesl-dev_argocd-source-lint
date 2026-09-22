@@ -263,6 +263,18 @@ def _resolve_git_files(repo_root: Path, entries: list[Any]) -> list[dict[str, st
     return param_sets
 
 
+# Real-world matrix uses (environments x regions, clusters x apps) rarely
+# reach even the low hundreds -- generous headroom, chosen the same way as
+# fsutil's `_MAX_EXPANDED_NODES`: far below where the cost actually starts
+# to matter. Confirmed for real, not theoretical: two `list` generators of
+# 5,000 small elements each (comfortably under the alias-bomb node budget
+# on their own -- that budget catches a densely *aliased* document, not a
+# large but flat one) produced 25,000,000 combinations in ~7s for the
+# combine step alone, before a single generated Application is even built
+# or run through a rule.
+_MAX_MATRIX_COMBINATIONS = 10_000
+
+
 def _resolve_matrix(
     matrix_generator: dict[str, Any], ctx: GeneratorContext
 ) -> tuple[list[dict[str, str]], list[Finding]]:
@@ -295,6 +307,22 @@ def _resolve_matrix(
 
     if len(param_lists) < 2 or any(not params for params in param_lists):
         return [], findings
+
+    total_combinations = 1
+    for params in param_lists:
+        total_combinations *= len(params)
+    if total_combinations > _MAX_MATRIX_COMBINATIONS:
+        sizes = " x ".join(str(len(params)) for params in param_lists)
+        return [], [
+            *findings,
+            _finding(
+                ctx,
+                f"matrix generator would produce {total_combinations} combinations "
+                f"({sizes}) — over this tool's {_MAX_MATRIX_COMBINATIONS} safety limit, "
+                "not computed rather than risking an expensive or unbounded cartesian "
+                "product.",
+            ),
+        ]
 
     combined: list[dict[str, str]] = [{}]
     for params in param_lists:

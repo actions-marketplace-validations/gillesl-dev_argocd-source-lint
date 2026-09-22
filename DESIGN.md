@@ -528,6 +528,88 @@ guarantee: still exponential below the limit, just a smaller limit).
 runs the exact hanging input from the repro and asserts it completes in
 under a second.
 
+## The follow-up audit: three more, on request
+
+The user explicitly asked for a second, more thorough pass after the
+three fixes above ("tu en vois d'autres ? ... refais un audit complet,
+je veux en être sûr"), rather than accepting a quick "looks fine."
+Checked systematically by category (every `subprocess.run` call, every
+YAML loader's constructor safety, every reporter's output escaping, the
+tar extraction path, the one other multiplicative-cost generator) —
+three more real, confirmed issues came out of it:
+
+**`materialize_revision` crashed on a hostile tar stream instead of
+returning `None`.** `filter="data"` (PEP 706 tar-slip hardening) does
+correctly *reject* a `../`-style entry — confirmed for real, a crafted
+entry raises `OutsideDestinationError` rather than extracting outside
+`tmp_root` — but that rejection is itself an exception, and nothing
+here caught it. An unhandled exception here would crash the whole CLI
+run instead of leaving one revision `unverifiable`, the same
+availability concern as any other "crash on hostile input" case this
+tool otherwise treats as a clean, typed finding. Now wrapped in `try:
+... except tarfile.TarError: pass`, same effect as the existing
+"subprocess failed" branch just above it: `snapshot_root` stays `None`.
+
+**The table reporter interpreted repo-controlled content as rich
+markup.** `rich.table.Table.add_row` parses every string argument as
+markup by default — confirmed for real: an Application's own
+`metadata.name` containing `[link=https://evil.example]click[/link]`
+rendered as an actual clickable hyperlink in the terminal, and a
+`[bold red on white]`-style tag actually re-styled the row. `location`
+(built from a filename) and `message` (a rule's own text, sometimes
+quoting something from the manifest) are exactly as reachable — a
+crafted repo could restyle or spoof this tool's *own* terminal output,
+including faking a clickable link a reviewer might trust because it
+came from the linter's own report. Fixed with `rich.markup.escape()`
+on every field except the severity cell, which is built entirely from
+this tool's own closed `Severity` enum and style map, never repo
+content.
+
+**The ApplicationSet `matrix` generator's cartesian product had no
+size cap.** The existing "max 2 children" cap is about *structural*
+correctness (matching real ArgoCD behavior, see "ApplicationSet
+generators" above) — it says nothing about how large those two
+children's own param lists can be, and a `list` generator's `elements:`
+is free-form repo-controlled YAML with no per-entry size floor.
+Confirmed for real: two `list` generators of 5,000 small elements each
+— individually well under `fsutil`'s alias-bomb node budget, since
+that budget catches a densely *aliased* document, not a large but flat
+one — produced 25,000,000 combinations in ~7s for the combine step
+alone, scaling quadratically, before a single generated `Application`
+is even built or run through a rule. `_MAX_MATRIX_COMBINATIONS =
+10_000` (chosen the same way as `fsutil._MAX_EXPANDED_NODES`: generous
+headroom over any real matrix use — environments x regions rarely
+reaches even the low hundreds — far below where the cost starts to
+matter) is checked by multiplying the already-resolved child sizes,
+before the cartesian product is ever built; over the cap produces an
+`unresolvable-generator` finding instead.
+
+Checked and confirmed **not** vulnerable, so no change needed:
+`ruamel.yaml`'s `typ="rt"`/`typ="safe"` loaders (used for every
+manifest and for `.argocd-lint.yaml` respectively) don't wire up
+Python-object construction from YAML tags at all — confirmed by
+actually feeding both a `!!python/object/apply:os.system [...]`
+payload; `typ="safe"` raises, `typ="rt"` silently ignores the tag and
+returns plain data, neither executes anything. The JUnit reporter
+builds XML through `xml.etree.ElementTree`, which escapes attribute/text
+content automatically — confirmed with a message containing `<`, `&`,
+`"`. The SARIF/JSON/GitLab reporters all go through `json.dumps`, never
+manual string concatenation. `pip-audit` against the exact resolved
+dependency versions found nothing (a point-in-time check, not a
+standing guarantee — worth re-running before any future release, not
+just once here).
+
+**Not a code fix, a documented limitation:** `.argocd-lint.yaml` and
+`.argocd-lint-baseline.yaml` are themselves repo content. A PR from an
+untrusted fork can edit either one in the same PR that introduces the
+issue it would otherwise be flagged for — downgrade a rule's severity,
+or add a baseline entry suppressing it. This is inherent to any
+in-repo policy/baseline mechanism (the same class of thing as a
+`# noqa` comment or a `.eslintrc` change in any other linter), not
+something a code change here can close; a team running this against
+untrusted forks' PRs should protect both files with `CODEOWNERS`/branch
+protection, the same way they'd protect CI configuration itself.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

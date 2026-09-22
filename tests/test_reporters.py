@@ -160,6 +160,31 @@ def test_table_prints_no_issues_message_when_findings_empty():
     assert "No issues detected." in console.file.getvalue()
 
 
+def test_table_escapes_rich_markup_in_repo_controlled_fields():
+    """`Table.add_row` parses every string argument as rich markup by
+    default -- confirmed for real: an Application name containing
+    `[link=...]` rendered as an actual clickable hyperlink, and a
+    `[bold red on white]`-style tag actually re-styled the output,
+    before this was fixed. `application`/`message`/`file` (via
+    `metadata.name`, a rule's message text, a filename) are all
+    repo-controlled -- a crafted repo must never be able to spoof or
+    restyle this tool's own terminal output."""
+    finding = Finding(
+        rule_id="orphan-source",
+        severity=Severity.ERROR,
+        application="[bold red on white]FAKE[/bold red on white] [link=https://evil.example]x[/link]",
+        message="normal message [green]looks legit[/green]",
+        file=Path("manifests/evil.yaml"),
+    )
+    console = Console(file=io.StringIO(), no_color=True, width=200)
+    render_table(console, [finding])
+
+    output = console.file.getvalue()
+    assert "[bold red on white]FAKE[/bold red on white]" in output
+    assert "[link=https://evil.example]x[/link]" in output
+    assert "[green]looks legit[/green]" in output
+
+
 def test_junit_marks_error_as_failure_and_warning_as_skipped():
     root = ET.fromstring(junit.render_findings([_FINDING_NO_LINE, _FINDING_WITH_LINE]))
 

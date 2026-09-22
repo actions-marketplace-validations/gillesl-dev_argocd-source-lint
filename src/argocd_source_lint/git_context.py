@@ -208,7 +208,8 @@ def materialize_revision(repo_root: Path, revision: str) -> Path | None:
     within this run; cleaned up at process exit. `None` if `revision`
     doesn't produce a tree (shouldn't happen — callers only reach this
     after `revision_matches_checkout` confirmed it resolves, or
-    `is_revision_resolvable` directly)."""
+    `is_revision_resolvable` directly), or if the archive itself can't
+    be safely extracted (see `filter="data"` below)."""
     if not _is_safe_revision(revision):
         return None
     cache_key = (repo_root, revision)
@@ -228,9 +229,21 @@ def materialize_revision(repo_root: Path, revision: str) -> Path | None:
         # mismatch despite being the same directory.
         tmp_root = Path(tempfile.mkdtemp(prefix="argocd-source-lint-")).resolve()
         atexit.register(shutil.rmtree, tmp_root, ignore_errors=True)
-        with tarfile.open(fileobj=BytesIO(result.stdout)) as tar:
-            tar.extractall(tmp_root, filter="data")
-        snapshot_root = tmp_root
+        try:
+            with tarfile.open(fileobj=BytesIO(result.stdout)) as tar:
+                # `filter="data"` (tar-slip hardening, PEP 706) rejects a
+                # `../`-style entry or an absolute path instead of writing
+                # outside `tmp_root` -- confirmed for real, not assumed:
+                # a crafted entry raises `OutsideDestinationError` rather
+                # than extracting. That's still an unhandled exception
+                # without this `try`, so a tar stream this tool doesn't
+                # control (git's own tree, however unlikely to contain
+                # such a path in practice) would crash the whole CLI
+                # instead of just leaving this one revision unresolved.
+                tar.extractall(tmp_root, filter="data")
+                snapshot_root = tmp_root
+        except tarfile.TarError:
+            pass
 
     _REVISION_SNAPSHOT_CACHE[cache_key] = snapshot_root
     return snapshot_root

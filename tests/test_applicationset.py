@@ -368,6 +368,53 @@ spec:
     assert "more than 2 child generators" in findings[0].message
 
 
+def test_matrix_generator_over_the_combination_cap_is_flagged_instead_of_computed(git_repo):
+    """Confirmed for real, not theoretical: two `list` generators of 5,000
+    small elements each -- individually well under the alias-bomb node
+    budget, since that budget catches a densely *aliased* document, not a
+    large but flat one -- produced 25,000,000 combinations in ~7s for the
+    combine step alone, before a single generated Application is even
+    built or run through a rule. This must be flagged, not computed."""
+    n = 200  # 200 x 200 = 40,000 > _MAX_MATRIX_COMBINATIONS (10,000)
+    side_a = "\n".join(f"                - region: r{i}" for i in range(n))
+    side_b = "\n".join(f"                - env: e{i}" for i in range(n))
+    repo_root = git_repo(
+        {
+            "bootstrap/appsets/matrix-appset.yaml": f"""\
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: matrix-appset
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+{side_a}
+          - list:
+              elements:
+{side_b}
+  template:
+    metadata:
+      name: 'app-{{{{region}}}}-{{{{env}}}}'
+    spec:
+      source:
+        repoURL: https://example.invalid/repo.git
+        targetRevision: HEAD
+        path: manifests/app
+""",
+        }
+    )
+
+    applications, findings = _discover(repo_root)
+
+    assert applications == []
+    assert len(findings) == 1
+    assert "40000 combinations" in findings[0].message
+    assert "safety limit" in findings[0].message
+
+
 def test_unresolvable_generator_produces_info_finding_and_no_applications(git_repo):
     repo_root = git_repo(
         {

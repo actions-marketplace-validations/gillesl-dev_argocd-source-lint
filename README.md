@@ -29,6 +29,7 @@ sensitive data involved.
 - [CI/CD integration](#cicd-integration)
 - [Development](#development)
 - [Changelog](./CHANGELOG.md)
+- [Security policy](./SECURITY.md)
 - [License](#license)
 
 ## What the tool does
@@ -216,7 +217,7 @@ jobs:
       contents: read # private repos only
     steps:
       - uses: actions/checkout@v4
-      - uses: gillesl-dev/argocd-source-lint@v0.1.35
+      - uses: gillesl-dev/argocd-source-lint@v0.1.36
         with:
           path: .
 ```
@@ -235,7 +236,7 @@ ref works after that (a tag, a branch, a commit SHA); replace
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.35
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.36
     inputs:
       scope: manifests/
 ```
@@ -245,7 +246,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.35
+    rev: v0.1.36
     hooks:
       - id: argocd-source-lint
 ```

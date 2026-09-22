@@ -3,6 +3,53 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.36] - 2026-09-22
+
+### Security
+
+A second, more thorough audit pass (explicitly requested: "tu en vois
+d'autres ? ... je veux en être sûr"), checked systematically by
+category rather than opportunistically. Three more real, confirmed
+issues:
+
+- `materialize_revision` crashed the whole CLI on a hostile tar
+  stream instead of returning `None`. `filter="data"` (PEP 706)
+  correctly rejects a `../`-style tar entry — confirmed for real, it
+  raises `OutsideDestinationError` rather than extracting outside the
+  target directory — but that rejection is itself an exception, and
+  nothing caught it. Now wrapped in `try: ... except tarfile.TarError`,
+  same effect as the existing "subprocess failed" branch beside it.
+- The table reporter interpreted repo-controlled content (an
+  Application's own name, a filename, a rule's message) as `rich`
+  markup. Confirmed for real: a crafted `metadata.name` containing
+  `[link=...]` rendered as an actual clickable hyperlink, and a
+  `[bold red on white]`-style tag actually re-styled the row — a
+  crafted repo could restyle or spoof this tool's own terminal output.
+  Every field except the severity cell (built from this tool's own
+  closed enum, never repo content) is now escaped with
+  `rich.markup.escape()`.
+- The ApplicationSet `matrix` generator's cartesian product had no
+  size cap — only the "max 2 children" structural cap existed, nothing
+  about how large those two children's own param lists could be.
+  Confirmed for real: two `list` generators of 5,000 small elements
+  each (individually well under the alias-bomb node budget, since that
+  budget catches a densely aliased document, not a large flat one)
+  produced 25,000,000 combinations in ~7s for the combine step alone,
+  before a single generated Application is even built. Capped at
+  10,000 combinations, checked before the cartesian product is built.
+
+Checked and confirmed not vulnerable: `ruamel.yaml`'s loaders don't
+execute Python object construction from YAML tags; the JUnit/SARIF/
+JSON/GitLab reporters all escape properly (`ElementTree`/`json.dumps`,
+never manual string concatenation); `pip-audit` found nothing against
+the exact resolved dependency versions.
+
+Documented as a limitation, not a code fix: `.argocd-lint.yaml` and
+`.argocd-lint-baseline.yaml` are repo content themselves, so an
+untrusted fork's PR can edit either in the same PR that introduces
+what it would otherwise flag — protect both with `CODEOWNERS`/branch
+protection if running against untrusted forks.
+
 ## [0.1.35] - 2026-09-22
 
 ### Security
