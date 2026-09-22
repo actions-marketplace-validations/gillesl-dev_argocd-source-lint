@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [1.0.1] - 2026-09-22
+
+### Fixed
+
+- `action.yml`'s `description` was 140 characters, over GitHub
+  Marketplace's 125-character limit — discovered while actually going
+  through the "Publish this Action to the GitHub Marketplace" flow,
+  which refused to proceed until it was shortened. No change to the
+  Python package itself (not republished to PyPI for this reason); the
+  git tag/release exists purely so the Marketplace listing can pick up
+  the corrected `action.yml` (the `v1.0.0` tag is left as-is, pointing
+  at the commit it was actually published from).
+
 ## [1.0.0] - 2026-09-22
 
 ### Changed

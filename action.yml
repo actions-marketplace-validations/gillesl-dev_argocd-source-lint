@@ -1,7 +1,7 @@
 name: 'ArgoCD Source Lint'
 description: >-
-  Detects silent failures in multi-source ArgoCD Applications: orphan
-  sources, broken values refs, missing ignoreDifferences, phantom targets.
+  Catches silent ArgoCD failures: orphan sources, broken values refs,
+  missing ignoreDifferences, phantom targets, and more.
 author: 'gillesl-dev'
 
 branding:
