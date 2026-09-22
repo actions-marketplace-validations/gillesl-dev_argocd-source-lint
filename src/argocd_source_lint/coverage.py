@@ -32,10 +32,12 @@ _KUSTOMIZATION_FILENAMES = ("kustomization.yaml", "kustomization.yml", "Kustomiz
 _KUSTOMIZATION_PATH_LIST_KEYS = ("resources", "bases", "components", "crds")
 
 
-_COVERED_FILES_CACHE: dict[tuple[Path, bool, str | None, str | None], tuple[Path, ...]] = {}
+_COVERED_FILES_CACHE: dict[tuple[Path, Path, bool, str | None, str | None], tuple[Path, ...]] = {}
 
 
-def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]:
+def covered_files_for_source(
+    source_dir: Path, source: Source, base_root: Path | None = None
+) -> Iterator[Path]:
     """Files actually covered by a `path` source, aligned with real ArgoCD
     behavior (`directory.recurse`/`include`/`exclude`, see DESIGN.md).
     Never called directly by a rule -- only through
@@ -51,21 +53,29 @@ def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]
     minimal repro, cost ~4.9s of re-walking before this cache and the
     sibling one in `fsutil.load_yaml_documents` existed. Same reset
     story as every other cache here: `clear_caches`, called once at the
-    start of `cli.lint`."""
+    start of `cli.lint`.
+
+    `base_root` bounds a Kustomize overlay's own `resources`/`bases`/...
+    references (see DESIGN.md "A Kustomize overlay can read outside the
+    repo") -- defaults to `source_dir` itself when not given (the
+    direct-call/test case), so a reference can never escape further
+    than wherever the walk started."""
+    base_root = source_dir.resolve() if base_root is None else base_root
     key = (
         source_dir.resolve(),
+        base_root,
         source.directory_recurse,
         source.directory_include,
         source.directory_exclude,
     )
     if key not in _COVERED_FILES_CACHE:
-        _COVERED_FILES_CACHE[key] = tuple(_covered_files_for_source(source_dir, source))
+        _COVERED_FILES_CACHE[key] = tuple(_covered_files_for_source(source_dir, source, base_root))
     yield from _COVERED_FILES_CACHE[key]
 
 
-def _covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]:
+def _covered_files_for_source(source_dir: Path, source: Source, base_root: Path) -> Iterator[Path]:
     if find_kustomization_file(source_dir) is not None:
-        yield from covered_files_for_kustomize_dir(source_dir)
+        yield from covered_files_for_kustomize_dir(source_dir, base_root)
         return
 
     if is_opaque_tool_directory(source_dir):
@@ -102,7 +112,7 @@ def covered_files_for_application(
         if resolved is None:
             continue
         base_root, source_dir = resolved
-        for found in covered_files_for_source(source_dir, source):
+        for found in covered_files_for_source(source_dir, source, base_root):
             covered.add(found.resolve().relative_to(base_root))
     return covered
 
@@ -120,8 +130,8 @@ def covered_documents_for_application(
         resolved = _resolved_source_root(repo_root, source)
         if resolved is None:
             continue
-        _base_root, source_dir = resolved
-        for found in covered_files_for_source(source_dir, source):
+        base_root, source_dir = resolved
+        for found in covered_files_for_source(source_dir, source, base_root):
             yield from load_yaml_documents(found)
 
 
@@ -129,7 +139,12 @@ def _resolved_source_root(repo_root: Path, source: Source) -> tuple[Path, Path] 
     """`(base_root, source_dir)` for `source`: `base_root` is `repo_root`,
     or a materialized snapshot of `source.target_revision` when that
     differs from what's checked out. `None` if the resulting directory
-    doesn't exist there."""
+    doesn't exist there -- or if `source.path` (repo-controlled YAML,
+    e.g. `path: ../../../etc`) would resolve *outside* `base_root`
+    entirely: confirmed for real, not theoretical, this tool would
+    otherwise walk and read arbitrary files anywhere on the host
+    filesystem reachable from the repo root, not just inside it (see
+    DESIGN.md "A Kustomize overlay can read outside the repo")."""
     base_root = repo_root
     if revision_matches_checkout(repo_root, source.target_revision) is False:
         snapshot_root = materialize_revision(repo_root, source.target_revision)
@@ -137,8 +152,9 @@ def _resolved_source_root(repo_root: Path, source: Source) -> tuple[Path, Path] 
             return None
         base_root = snapshot_root
 
+    base_root = base_root.resolve()
     source_dir = (base_root / source.path).resolve()
-    if not source_dir.is_dir():
+    if not source_dir.is_relative_to(base_root) or not source_dir.is_dir():
         return None
     return base_root, source_dir
 
@@ -155,7 +171,9 @@ def find_kustomization_file(directory: Path) -> Path | None:
     return None
 
 
-def covered_files_for_kustomize_dir(directory: Path, _seen: set[Path] | None = None) -> set[Path]:
+def covered_files_for_kustomize_dir(
+    directory: Path, base_root: Path | None = None, _seen: set[Path] | None = None
+) -> set[Path]:
     """Files actually consumed by a Kustomize overlay: the
     `kustomization.yaml` itself, plus every local `resources`/`bases`/
     `components`/`crds` entry (recursing into a directory reference),
@@ -163,7 +181,15 @@ def covered_files_for_kustomize_dir(directory: Path, _seen: set[Path] | None = N
     every `configMapGenerator`/`secretGenerator` `files`/`envs`/`envFile`
     entry. Anything in the directory but never referenced stays uncovered
     — the same `orphan-source` signal as a plain directory source, one
-    level deeper."""
+    level deeper.
+
+    `base_root` bounds every reference resolved below -- defaults to
+    `directory` itself when not given (the direct-call/test case).
+    Unlike an Application's own `path`, these come from *tracked YAML
+    content*, not ArgoCD's own schema: a `resources: [../../../etc]`
+    entry is otherwise resolved and walked exactly like a real one (see
+    DESIGN.md "A Kustomize overlay can read outside the repo")."""
+    base_root = directory.resolve() if base_root is None else base_root
     kustomization_file = find_kustomization_file(directory)
     if kustomization_file is None:
         return set()
@@ -183,26 +209,28 @@ def covered_files_for_kustomize_dir(directory: Path, _seen: set[Path] | None = N
     for key in _KUSTOMIZATION_PATH_LIST_KEYS:
         for entry in doc.get(key) or []:
             if isinstance(entry, str):
-                covered |= _resolve_local_reference(directory, entry, seen)
+                covered |= _resolve_local_reference(directory, entry, base_root, seen)
 
     for entry in doc.get("patchesStrategicMerge") or []:
         if isinstance(entry, str):  # a dict entry is an inline patch, no file
-            covered |= _resolve_local_reference(directory, entry, seen)
+            covered |= _resolve_local_reference(directory, entry, base_root, seen)
 
     for key in ("patches", "patchesJson6902"):
         for entry in doc.get(key) or []:
             path = (entry or {}).get("path") if isinstance(entry, dict) else None
             if path:
-                covered |= _resolve_local_reference(directory, path, seen)
+                covered |= _resolve_local_reference(directory, path, base_root, seen)
 
     for generator_key in ("configMapGenerator", "secretGenerator"):
         for generator in doc.get(generator_key) or []:
-            covered |= _generator_referenced_files(directory, generator, seen)
+            covered |= _generator_referenced_files(directory, generator, base_root, seen)
 
     return covered
 
 
-def _generator_referenced_files(directory: Path, generator: Any, seen: set[Path]) -> set[Path]:
+def _generator_referenced_files(
+    directory: Path, generator: Any, base_root: Path, seen: set[Path]
+) -> set[Path]:
     if not isinstance(generator, dict):
         return set()
 
@@ -211,21 +239,25 @@ def _generator_referenced_files(directory: Path, generator: Any, seen: set[Path]
         # A `configMapGenerator`/`secretGenerator` file entry is either a
         # bare path or a `key=path` pair.
         _, _, rel_path = str(file_entry).rpartition("=")
-        covered |= _resolve_local_reference(directory, rel_path, seen)
+        covered |= _resolve_local_reference(directory, rel_path, base_root, seen)
 
     env_entries = list(generator.get("envs") or [])
     if generator.get("envFile"):
         env_entries.append(generator["envFile"])
     for rel_path in env_entries:
-        covered |= _resolve_local_reference(directory, rel_path, seen)
+        covered |= _resolve_local_reference(directory, rel_path, base_root, seen)
 
     return covered
 
 
-def _resolve_local_reference(directory: Path, entry: str, seen: set[Path]) -> set[Path]:
+def _resolve_local_reference(
+    directory: Path, entry: str, base_root: Path, seen: set[Path]
+) -> set[Path]:
     target = (directory / entry).resolve()
+    if not target.is_relative_to(base_root):
+        return set()  # escapes base_root: never resolved, real or not
     if target.is_dir():
-        return covered_files_for_kustomize_dir(target, seen)
+        return covered_files_for_kustomize_dir(target, base_root, seen)
     if target.is_file():
         return {target}
     return set()  # doesn't exist locally: a remote reference, out of scope

@@ -448,6 +448,53 @@ into the existing `unverifiable` handling.
 the guard, not just the parsing: it spies on `subprocess.run` and
 asserts zero calls, rather than trusting a mocked git's exit code.
 
+## A Kustomize overlay can read outside the repo
+
+Found while auditing the same class of bug as the `targetRevision`
+issue above, same session: `coverage._resolved_source_root` joined a
+source's own `path` onto `base_root` (`(base_root / source.path)
+.resolve()`) with no check that the result stayed inside `base_root`.
+Confirmed for real, not theoretical: a source with `path:
+../outside-secret` made `covered_files_for_application` crash
+(`Path.relative_to` raises on a path outside `base_root`) and made
+`covered_documents_for_application` — which has no such call — silently
+read and return a `Secret`'s full content from a sibling directory
+entirely outside the git repo. Unlike the `targetRevision` case, this
+one isn't network-shaped, it's a straight local file disclosure: the
+five rules reading `covered_documents_for_application`
+(`missing-ignore-diff`, `hpa-selfheal-conflict`, `unknown-sync-option`,
+`unknown-resource-hook`, `malformed-sync-wave`) would happily surface
+content from anywhere reachable via `../` from the repo root into a
+finding message.
+
+A second, independent instance of the exact same bug lives one level
+deeper: `coverage._resolve_local_reference` (a Kustomize overlay's own
+`resources`/`bases`/`components`/`crds`/`patches*`/generator entries)
+joined `directory / entry` the same unguarded way — except here `entry`
+comes from *tracked YAML content* a `kustomization.yaml` file, not from
+ArgoCD's own schema, so this one doesn't even need a crafted
+`Application`: any commit that can edit a `kustomization.yaml` (a much
+lower bar — a PR touching manifests, not the Application definition
+itself) can reach it, and the recursion means a nested overlay chain
+could walk arbitrarily far outside the repo.
+
+Both fixed the same way: `base_root` (the repo root, or a materialized
+`targetRevision` snapshot) is threaded through
+`covered_files_for_source` → `covered_files_for_kustomize_dir` →
+`_resolve_local_reference`'s whole recursive call chain, and every
+resolved path is checked against it (`Path.is_relative_to`) *before*
+it's ever stat'd, walked, or read — not filtered out of the result
+afterward, which would still mean touching arbitrary filesystem
+locations along the way (a directory listing, at minimum) even if the
+content were later discarded. `base_root` defaults to the function's
+own starting directory when not given, so every existing direct/test
+caller keeps working unchanged — the default is already the correct,
+most restrictive boundary for a call with no wider context.
+`test_kustomize_resources_entry_within_base_root_still_resolves`
+guards the fix itself: a legitimate `../` reference stated inside the
+repo (an overlay referencing a shared base a few levels up — a common,
+real Kustomize pattern) must keep resolving.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

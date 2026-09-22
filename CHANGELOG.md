@@ -3,6 +3,32 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.34] - 2026-09-22
+
+### Security
+
+- A source's own `path` (e.g. `path: ../outside-secret`) was joined
+  onto the repo root with no check that the result stayed inside it.
+  Confirmed for real: this crashed `covered_files_for_application`
+  (`orphan-source`, `double-coverage`) and made
+  `covered_documents_for_application` (`missing-ignore-diff`,
+  `hpa-selfheal-conflict`, `unknown-sync-option`,
+  `unknown-resource-hook`, `malformed-sync-wave`) silently read and
+  surface a file's full content from anywhere reachable via `../` from
+  the repo root — a straight local file disclosure, not just a crash.
+- A second, independent instance of the same bug: a Kustomize overlay's
+  own `resources`/`bases`/`components`/`crds`/`patches*`/generator
+  entries were resolved the same unguarded way. This one comes from
+  *tracked YAML content*, not ArgoCD's own schema, so it doesn't even
+  need a crafted `Application` — any commit touching a
+  `kustomization.yaml` can reach it, and the recursion means a nested
+  overlay chain could walk arbitrarily far outside the repo.
+- Both fixed by threading the repo/snapshot root through the whole
+  resolution chain and checking every resolved path against it
+  (`Path.is_relative_to`) before it's ever stat'd, walked, or read —
+  never filtered out of the result afterward, which would still touch
+  arbitrary filesystem locations along the way.
+
 ## [0.1.33] - 2026-09-22
 
 ### Security

@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-from argocd_source_lint.coverage import covered_files_for_kustomize_dir, match_directory_patterns
+from argocd_source_lint.coverage import (
+    covered_documents_for_application,
+    covered_files_for_application,
+    covered_files_for_kustomize_dir,
+    match_directory_patterns,
+)
+from argocd_source_lint.git_context import get_origin_url
+from argocd_source_lint.loader import RawManifestDiscovery
 
 
 def _write(root: Path, relative: str, content: str = "kind: Deployment\n") -> Path:
@@ -138,6 +146,37 @@ def test_resources_cycle_does_not_infinite_loop(tmp_path):
     assert (tmp_path / "kustomization.yaml").resolve() in covered
 
 
+def test_kustomize_resources_entry_that_escapes_base_root_is_not_resolved(tmp_path):
+    """A `resources:`/`bases:`/... entry comes from *tracked YAML
+    content*, not ArgoCD's own schema -- confirmed for real: without
+    `base_root`, `../../../etc/passwd`-style entries were resolved and
+    read exactly like a real reference, walking and leaking file
+    content from anywhere on the host filesystem reachable from the
+    repo, not just inside it (see DESIGN.md "A Kustomize overlay can
+    read outside the repo")."""
+    repo_root = tmp_path / "repo"
+    outside = tmp_path / "outside-secret"
+    leaked = _write(outside, "leaked.yaml", "kind: Secret\n")
+    _write(repo_root, "kustomization.yaml", "resources:\n  - ../outside-secret/leaked.yaml\n")
+
+    covered = covered_files_for_kustomize_dir(repo_root, repo_root.resolve())
+
+    assert leaked.resolve() not in covered
+    assert covered == {repo_root.resolve() / "kustomization.yaml"}
+
+
+def test_kustomize_resources_entry_within_base_root_still_resolves(tmp_path):
+    """Regression guard for the fix above: a legitimate `../` reference
+    that stays inside the repo -- a common Kustomize pattern, an overlay
+    referencing a shared base a few levels up -- must still resolve."""
+    base = _write(tmp_path, "shared/base.yaml")
+    _write(tmp_path, "overlays/prod/kustomization.yaml", "resources:\n  - ../../shared/base.yaml\n")
+
+    covered = covered_files_for_kustomize_dir(tmp_path / "overlays" / "prod", tmp_path.resolve())
+
+    assert base.resolve() in covered
+
+
 def test_non_kustomize_directory_returns_empty_set(tmp_path):
     _write(tmp_path, "deployment.yaml")
 
@@ -155,3 +194,50 @@ def test_match_directory_patterns_is_case_sensitive():
 
 def test_match_directory_patterns_brace_alternatives_still_match():
     assert match_directory_patterns("app/deployment.yaml", "{*.yaml,app/*.yaml}") is True
+
+
+def test_a_source_path_that_escapes_the_repo_covers_and_reads_nothing(tmp_path):
+    """A source's own `path` is repo-controlled YAML too, same as a
+    Kustomize `resources:` entry -- confirmed for real: `path:
+    ../outside-secret` used to walk and read a sibling directory's
+    content entirely outside the repo, crashing
+    `covered_files_for_application` (`Path.relative_to` on a path
+    outside `base_root`) and silently leaking file content through
+    `covered_documents_for_application` (no such check at all)."""
+    repo_root = tmp_path / "repo"
+    outside = tmp_path / "outside-secret"
+    _write(outside, "leaked.yaml", "apiVersion: v1\nkind: Secret\nmetadata:\n  name: leaked\n")
+    _write(
+        repo_root,
+        "app.yaml",
+        "apiVersion: argoproj.io/v1alpha1\n"
+        "kind: Application\n"
+        "metadata:\n"
+        "  name: app\n"
+        "spec:\n"
+        "  source:\n"
+        "    repoURL: https://example.invalid/repo.git\n"
+        "    targetRevision: HEAD\n"
+        "    path: ../outside-secret\n",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/repo.git"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+    )
+
+    applications = RawManifestDiscovery().discover(repo_root)
+    local_origin = get_origin_url(repo_root)
+    app = applications[0]
+
+    assert covered_files_for_application(app, repo_root, local_origin) == set()
+    assert list(covered_documents_for_application(app, repo_root, local_origin)) == []
