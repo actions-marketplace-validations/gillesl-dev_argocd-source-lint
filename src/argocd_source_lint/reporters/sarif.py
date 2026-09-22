@@ -44,6 +44,11 @@ _RULES_METADATA = {
         "An ignoreDifferences jsonPointers entry doesn't start with / (RFC 6901) -- "
         "it matches nothing, so the field isn't actually ignored."
     ),
+    "malformed-ignore-diff-jq-expression": (
+        "An ignoreDifferences jqPathExpressions entry doesn't start with . -- fails "
+        "to compile as jq, voiding the entire ignoreDifferences list for that "
+        "Application, not just this entry."
+    ),
     "unknown-sync-option": (
         "A syncOptions entry (Application-level or the per-resource sync-options "
         "annotation) doesn't match any ArgoCD-recognized key -- likely a typo, "

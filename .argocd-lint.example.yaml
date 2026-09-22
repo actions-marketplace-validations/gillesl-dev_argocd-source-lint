@@ -18,6 +18,7 @@ rules:
   sync-validation-disabled: info
   duplicate-application-name: error
   malformed-ignore-diff-pointer: warning
+  malformed-ignore-diff-jq-expression: warning
   unknown-sync-option: warning
   unknown-resource-hook: warning
   malformed-sync-wave: warning

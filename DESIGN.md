@@ -746,11 +746,51 @@ the most frequent variant reported.
 Deliberately not a heuristic: RFC 6901 makes "does this start with `/`"
 an objective yes/no, unlike e.g. `missing-ignore-diff`'s pattern
 matching. `jqPathExpressions` (the other `ignoreDifferences` matcher)
-isn't checked the same way — validating `jq` syntax would need an actual
-`jq` parser (a `libjq` binding), a real dependency for uncertain payoff,
-and most of the community-reported `jqPathExpressions` problems turn out
-to be ArgoCD-side behavior quirks that vary by version rather than
-authoring mistakes a static check could catch reliably.
+isn't checked the same *full* way — validating actual `jq` syntax would
+need a real `jq` parser (a `libjq` binding), a dependency for uncertain
+payoff, and most of the community-reported `jqPathExpressions`
+*behavior* problems turn out to be ArgoCD-side quirks that vary by
+version rather than authoring mistakes a static check could catch
+reliably. The one narrow, purely syntactic slice that's just as
+objective as this rule's own check does get one — see
+`malformed-ignore-diff-jq-expression` below.
+
+## `malformed-ignore-diff-jq-expression`
+
+The sibling check to `malformed-ignore-diff-pointer` above, deliberately
+scoped just as narrowly: a `jqPathExpressions` entry that doesn't start
+with `.` — every real example in ArgoCD's own diffing-customization docs
+does (`.spec.template.spec.initContainers[] | select(...)`,
+`.webhooks[]?.clientConfig.caBundle`), the same way every `jsonPointers`
+entry starts with `/`. The mistake this catches is concrete and easy to
+make given how these two fields sit right next to each other in the
+same YAML block: pasting a `jsonPointers`-style path (`/spec/replicas`)
+into `jqPathExpressions` instead. `/spec/replicas` isn't valid jq — it
+fails to parse.
+
+This isn't a reversal of the "no real `jq` parser" call above (see
+`argocd-source-lint-plan-technique.md`'s `v0.1.16` note, which excluded
+`jqPathExpressions` from validation for the same reason repeated there):
+that decision was about not chasing ArgoCD's own version-dependent
+*evaluation* quirks (label selectors not filtering as expected, arrays
+being dropped, etc. — real reported behavior, but not something a
+static syntax check should try to predict). Checking for a leading `.`
+needs no `jq` engine at all, catches an authoring mistake, not an
+ArgoCD bug, and is exactly as objective as the RFC 6901 check right
+above it.
+
+The blast radius is actually *wider* than a bad `jsonPointers` entry,
+confirmed directly against ArgoCD's own source
+(`util/argo/normalizers/diff_normalizer.go`'s `NewIgnoreNormalizer`,
+which compiles every `jqPathExpressions` entry via `gojq.Parse`/
+`gojq.Compile`, wrapped as `del(<expression>)`): a parse failure
+returns an error immediately, aborting construction of the normalizer
+for the *entire* `ignoreDifferences` list, not just the one malformed
+entry — every other rule in the same list, `jsonPointers` included,
+stops being honored too. This matches real community reports of
+`jqPathExpressions` that "apply without errors but don't actually do
+anything" — silent, exactly the failure category this tool exists for,
+and worse here than the isolated failure of a single bad pointer.
 
 ## `unknown-sync-option`
 

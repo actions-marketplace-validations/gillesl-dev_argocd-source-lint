@@ -47,6 +47,7 @@ sensitive data involved.
 | `sync-validation-disabled` | info | `Validate=false` sync option — an invalid manifest is applied anyway instead of blocking |
 | `duplicate-application-name` | error | two or more Applications share the same namespace+name — ArgoCD keys an Application by that pair, so one silently overwrites/fights the other |
 | `malformed-ignore-diff-pointer` | warning | an `ignoreDifferences` `jsonPointers` entry doesn't start with `/` (RFC 6901) — it matches nothing, so the field isn't actually ignored |
+| `malformed-ignore-diff-jq-expression` | warning | an `ignoreDifferences` `jqPathExpressions` entry doesn't start with `.` — fails to compile as jq, voiding the *entire* `ignoreDifferences` list for that Application, not just this entry |
 | `unknown-sync-option` | warning | a `syncOptions` entry (Application-level or the per-resource `sync-options` annotation) doesn't match any ArgoCD-recognized key (case-sensitive) — likely a typo, silently ignored instead of erroring |
 | `unknown-resource-hook` | warning | an `argocd.argoproj.io/hook`/`hook-delete-policy` annotation value doesn't match any ArgoCD-recognized value — likely a typo, silently falls through instead of erroring |
 | `malformed-sync-wave` | warning | an `argocd.argoproj.io/sync-wave` annotation value isn't a valid integer — silently falls back to wave 0 instead of erroring |
@@ -77,7 +78,7 @@ $ argocd-source-lint .
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>unknown-sync-option, unknown-resource-hook, malformed-sync-wave"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>malformed-ignore-diff-jq-expression, unknown-sync-option,<br/>unknown-resource-hook, malformed-sync-wave"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -159,6 +160,7 @@ rules:
   sync-validation-disabled: info
   duplicate-application-name: error
   malformed-ignore-diff-pointer: warning
+  malformed-ignore-diff-jq-expression: warning
   unknown-sync-option: warning
   unknown-resource-hook: warning
   malformed-sync-wave: warning
@@ -214,7 +216,7 @@ jobs:
       contents: read # private repos only
     steps:
       - uses: actions/checkout@v4
-      - uses: gillesl-dev/argocd-source-lint@v0.1.31
+      - uses: gillesl-dev/argocd-source-lint@v0.1.32
         with:
           path: .
 ```
@@ -233,7 +235,7 @@ ref works after that (a tag, a branch, a commit SHA); replace
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.31
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v0.1.32
     inputs:
       scope: manifests/
 ```
@@ -243,7 +245,7 @@ include:
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v0.1.31
+    rev: v0.1.32
     hooks:
       - id: argocd-source-lint
 ```

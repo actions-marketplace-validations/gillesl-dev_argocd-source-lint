@@ -3,6 +3,32 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.32] - 2026-09-22
+
+### Added
+
+- `malformed-ignore-diff-jq-expression` rule: an `ignoreDifferences`
+  `jqPathExpressions` entry that doesn't start with `.` — every real
+  example in ArgoCD's own docs does, the same convention `jsonPointers`
+  has for `/`. Usually a `jsonPointers`-style path pasted into the
+  wrong sibling field. Confirmed against ArgoCD's own source
+  (`NewIgnoreNormalizer`): a parse failure here voids the *entire*
+  `ignoreDifferences` list for that Application, not just this entry —
+  a wider blast radius than a bad `jsonPointers` entry, and matching
+  real reports of `jqPathExpressions` that "apply without errors but
+  don't actually do anything." Deliberately as narrow as
+  `malformed-ignore-diff-pointer`: no `jq` engine involved, no attempt
+  to catch ArgoCD's own version-dependent evaluation quirks.
+
+### Fixed
+
+- `policy.DEFAULT_RULE_SEVERITIES` and `reporters/sarif.py`'s
+  `_RULES_METADATA` are two more manually maintained rule-ID lists,
+  same shape as the `cli.RULES` gap closed in `0.1.31` — a rule
+  missing from either wouldn't crash, just silently lose its
+  configurable severity or its SARIF `fullDescription`/`helpUri`. Two
+  new tests assert both stay in sync with the real rule set.
+
 ## [0.1.31] - 2026-09-22
 
 ### Fixed

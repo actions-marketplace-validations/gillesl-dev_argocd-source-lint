@@ -8,7 +8,9 @@ from xml.etree import ElementTree as ET
 from rich.console import Console
 
 from argocd_source_lint.models import Finding, Severity
+from argocd_source_lint.policy import DEFAULT_RULE_SEVERITIES
 from argocd_source_lint.reporters import gitlab_codequality, json_report, junit, sarif
+from argocd_source_lint.reporters.sarif import _RULES_METADATA
 from argocd_source_lint.reporters.table import render_findings as render_table
 
 _FINDING_NO_LINE = Finding(
@@ -60,24 +62,13 @@ def test_sarif_structure_and_severity_mapping():
     assert payload["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
     assert payload["version"] == "2.1.0"
     run = payload["runs"][0]
+    # Every known rule, not just the two with results here -- covered
+    # more precisely (against DEFAULT_RULE_SEVERITIES) by
+    # test_sarif_rules_metadata_covers_every_configurable_rule below;
+    # this just confirms render_findings doesn't filter driver.rules
+    # down to the rules that actually produced a result.
     rule_ids = {rule["id"] for rule in run["tool"]["driver"]["rules"]}
-    assert rule_ids == {
-        "orphan-source",
-        "broken-values-ref",
-        "missing-ignore-diff",
-        "phantom-target",
-        "unresolvable-generator",
-        "double-coverage",
-        "revision-mismatch",
-        "project-scope-violation",
-        "hpa-selfheal-conflict",
-        "sync-validation-disabled",
-        "duplicate-application-name",
-        "malformed-ignore-diff-pointer",
-        "unknown-sync-option",
-        "unknown-resource-hook",
-        "malformed-sync-wave",
-    }
+    assert rule_ids == set(DEFAULT_RULE_SEVERITIES)
 
     results = run["results"]
     assert len(results) == 2
@@ -98,6 +89,15 @@ def test_sarif_rules_have_recommended_metadata():
 
     # unresolvable-generator defaults to info -> SARIF "note".
     assert rules["unresolvable-generator"]["defaultConfiguration"]["level"] == "note"
+
+
+def test_sarif_rules_metadata_covers_every_configurable_rule():
+    """A third manually maintained rule-ID list, same silent-omission
+    risk as `cli.RULES`/`policy.DEFAULT_RULE_SEVERITIES`: a rule missing
+    here doesn't crash (the SARIF `results` still reference it by id),
+    it just silently loses its `fullDescription`/`helpUri`/
+    `defaultConfiguration` in the `driver.rules` array."""
+    assert set(_RULES_METADATA) == set(DEFAULT_RULE_SEVERITIES)
 
 
 def test_sarif_results_carry_a_stable_fingerprint():

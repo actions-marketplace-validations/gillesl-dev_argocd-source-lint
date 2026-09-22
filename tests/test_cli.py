@@ -8,8 +8,10 @@ from xml.etree import ElementTree as ET
 
 from typer.testing import CliRunner
 
+from argocd_source_lint import applicationset
 from argocd_source_lint import rules as rules_package
 from argocd_source_lint.cli import RULES, app
+from argocd_source_lint.policy import DEFAULT_RULE_SEVERITIES
 from argocd_source_lint.rules.base import Rule
 
 runner = CliRunner()
@@ -34,6 +36,20 @@ def test_every_rule_class_is_registered_in_cli_rules():
     }
     registered_classes = {type(rule) for rule in RULES}
     assert all_rule_classes == registered_classes
+
+
+def test_every_rule_has_a_default_severity():
+    """The same silent-omission risk as the test above, one dict over:
+    `policy.DEFAULT_RULE_SEVERITIES` is maintained by hand too, and a
+    rule missing from it would still run (its own `.get(RULE_ID, ...)`
+    fallback covers that), but silently drop out of `Policy().rules` --
+    e.g. a future feature that lists every configurable rule and its
+    severity would miss it with no test ever noticing. `unresolvable-
+    generator` is the one deliberate exception: its findings come from
+    `applicationset.discover`, not a `Rule.check()` in `RULES`, but its
+    severity is still policy-configurable."""
+    registered_ids = {rule.rule_id for rule in RULES} | {applicationset.RULE_ID}
+    assert registered_ids == set(DEFAULT_RULE_SEVERITIES)
 
 
 def test_missing_git_exits_2_with_a_clear_error_instead_of_degrading(fixture_repo):
