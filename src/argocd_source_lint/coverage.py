@@ -32,10 +32,37 @@ _KUSTOMIZATION_FILENAMES = ("kustomization.yaml", "kustomization.yml", "Kustomiz
 _KUSTOMIZATION_PATH_LIST_KEYS = ("resources", "bases", "components", "crds")
 
 
+_COVERED_FILES_CACHE: dict[tuple[Path, bool, str | None, str | None], tuple[Path, ...]] = {}
+
+
 def covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]:
     """Files actually covered by a `path` source, aligned with real ArgoCD
     behavior (`directory.recurse`/`include`/`exclude`, see DESIGN.md). Used
-    by `orphan-source` and `missing-ignore-diff`."""
+    by `orphan-source` and `missing-ignore-diff`, and by
+    `covered_files_for_application`/`covered_documents_for_application`
+    below on behalf of the five rules that read an Application's covered
+    content -- each of those independently walks the same source
+    directory, so the result is cached by the only inputs it actually
+    depends on (`source_dir`, plus the three `directory.*` fields that
+    can change what's yielded from the same directory). Confirmed for
+    real: 40 Applications x 15 covered files each, x 3 rules that
+    happened to reach this path in a minimal repro, cost ~4.9s of
+    re-walking before this cache and the sibling one in
+    `fsutil.load_yaml_documents` existed. Same reset story as every
+    other cache here: `clear_caches`, called once at the start of
+    `cli.lint`."""
+    key = (
+        source_dir.resolve(),
+        source.directory_recurse,
+        source.directory_include,
+        source.directory_exclude,
+    )
+    if key not in _COVERED_FILES_CACHE:
+        _COVERED_FILES_CACHE[key] = tuple(_covered_files_for_source(source_dir, source))
+    yield from _COVERED_FILES_CACHE[key]
+
+
+def _covered_files_for_source(source_dir: Path, source: Source) -> Iterator[Path]:
     if find_kustomization_file(source_dir) is not None:
         yield from covered_files_for_kustomize_dir(source_dir)
         return
@@ -201,6 +228,13 @@ def _resolve_local_reference(directory: Path, entry: str, seen: set[Path]) -> se
     if target.is_file():
         return {target}
     return set()  # doesn't exist locally: a remote reference, out of scope
+
+
+def clear_caches() -> None:
+    """Resets `covered_files_for_source`'s cache -- called once at the
+    start of `cli.lint`, same reasoning as `fsutil.clear_caches` and
+    `git_context.clear_caches`."""
+    _COVERED_FILES_CACHE.clear()
 
 
 def match_directory_patterns(relative_posix: str, pattern: str) -> bool:

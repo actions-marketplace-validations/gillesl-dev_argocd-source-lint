@@ -9,7 +9,7 @@ from argocd_source_lint.git_context import external_path_sources, is_local_repo_
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy
 from argocd_source_lint.rules.base import Rule, external_source_finding
-from argocd_source_lint.rules.broken_values_ref import _parse_ref_entry
+from argocd_source_lint.rules.broken_values_ref import parse_ref_entry, ref_sources_by_name
 
 RULE_ID = "orphan-source"
 IGNORE_MARKER = "argocd-lint:ignore"
@@ -73,11 +73,11 @@ class OrphanSourceRule(Rule):
 
 
 def _referenced_value_file_paths(app: Application, local_origin: str | None) -> set[str]:
-    ref_sources = {source.ref: source for source in app.sources if source.ref}
+    ref_sources = ref_sources_by_name(app)
     paths: set[str] = set()
     for source in app.sources:
         for entry in source.helm_value_files:
-            ref_name, rel_path = _parse_ref_entry(entry)
+            ref_name, rel_path = parse_ref_entry(entry)
             if ref_name is None:
                 continue
             ref_source = ref_sources.get(ref_name)

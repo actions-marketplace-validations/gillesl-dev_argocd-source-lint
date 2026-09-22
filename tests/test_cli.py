@@ -1,14 +1,39 @@
 from __future__ import annotations
 
+import importlib
 import json
+import pkgutil
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from typer.testing import CliRunner
 
-from argocd_source_lint.cli import app
+from argocd_source_lint import rules as rules_package
+from argocd_source_lint.cli import RULES, app
+from argocd_source_lint.rules.base import Rule
 
 runner = CliRunner()
+
+
+def test_every_rule_class_is_registered_in_cli_rules():
+    """A `Rule` subclass that exists under `rules/` but is never added to
+    `cli.RULES` would otherwise stay invisible to every test here: its
+    own unit test instantiates it and calls `.check()` directly, so it
+    can pass while the real CLI never runs it at all -- confirmed for
+    real, not hypothetical: a throwaway rule module left this way left
+    the full suite green. `pkgutil.iter_modules` force-imports every
+    module under `rules/` first, so a rule nobody imports yet is still
+    visible to `Rule.__subclasses__()`."""
+    for module_info in pkgutil.iter_modules(rules_package.__path__, rules_package.__name__ + "."):
+        importlib.import_module(module_info.name)
+
+    all_rule_classes = {
+        cls
+        for cls in Rule.__subclasses__()
+        if cls.__module__.startswith("argocd_source_lint.rules.")
+    }
+    registered_classes = {type(rule) for rule in RULES}
+    assert all_rule_classes == registered_classes
 
 
 def test_missing_git_exits_2_with_a_clear_error_instead_of_degrading(fixture_repo):

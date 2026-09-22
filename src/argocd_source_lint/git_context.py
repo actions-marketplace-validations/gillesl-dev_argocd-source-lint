@@ -145,11 +145,13 @@ def _resolve_commit(repo_root: Path, revision: str) -> str | None:
 
 def clear_caches() -> None:
     """Resets every module-level cache here (`_resolve_commit`,
-    `materialize_revision`) -- called once at the start of `cli.lint`,
-    so each CLI invocation starts clean rather than these persisting
-    for the life of the process (see `_resolve_commit`)."""
+    `materialize_revision`, `tree_paths_at_revision`) -- called once at
+    the start of `cli.lint`, so each CLI invocation starts clean rather
+    than these persisting for the life of the process (see
+    `_resolve_commit`)."""
     _RESOLVED_COMMIT_CACHE.clear()
     _REVISION_SNAPSHOT_CACHE.clear()
+    _FULL_TREE_CACHE.clear()
 
 
 def revision_matches_checkout(repo_root: Path, revision: str) -> bool | None:
@@ -220,3 +222,38 @@ def list_tree_paths(repo_root: Path, revision: str, pathspec: str) -> list[str]:
     if result.returncode != 0:
         return []
     return result.stdout.splitlines()
+
+
+_FULL_TREE_CACHE: dict[tuple[Path, str], frozenset[str]] = {}
+
+
+def tree_paths_at_revision(repo_root: Path, revision: str) -> frozenset[str]:
+    """Every file path at `revision`, one `git ls-tree` of the whole tree
+    per `(repo_root, revision)` -- cached the same way and for the same
+    reason as `_resolve_commit`. Callers that used to ask `list_tree_paths`
+    the same revision-scoped question once per distinct path (`phantom-
+    target`: one `git ls-tree` per Application, even though most share
+    `targetRevision: HEAD`) get it for the cost of one call total instead.
+    Cleared by `clear_caches`."""
+    cache_key = (repo_root, revision)
+    if cache_key not in _FULL_TREE_CACHE:
+        _FULL_TREE_CACHE[cache_key] = frozenset(list_tree_paths(repo_root, revision, "."))
+    return _FULL_TREE_CACHE[cache_key]
+
+
+def path_has_tracked_files(repo_root: Path, revision: str, pathspec: str) -> bool:
+    """Whether `pathspec` (a file, or a directory containing at least one
+    tracked file) exists at `revision` -- the same question
+    `list_tree_paths(repo_root, revision, pathspec)` answers via its own
+    `git ls-tree` call, backed instead by `tree_paths_at_revision`'s
+    single whole-tree call. A literal path match/prefix check, same as
+    git's own pathspec matching for a plain (non-glob) path; a
+    `pathspec` containing glob metacharacters (`*`, `?`, `[`) -- not a
+    real ArgoCD `source.path` value -- would not match here the way
+    `git ls-tree` itself would expand it."""
+    pathspec = pathspec.strip("/") or "."
+    paths = tree_paths_at_revision(repo_root, revision)
+    if pathspec == ".":
+        return bool(paths)
+    prefix = pathspec + "/"
+    return any(path == pathspec or path.startswith(prefix) for path in paths)

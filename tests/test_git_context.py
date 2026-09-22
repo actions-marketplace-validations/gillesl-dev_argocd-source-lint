@@ -10,7 +10,9 @@ from argocd_source_lint.git_context import (
     is_git_available,
     is_local_repo_url,
     normalize_repo_url,
+    path_has_tracked_files,
     revision_matches_checkout,
+    tree_paths_at_revision,
 )
 
 
@@ -89,6 +91,61 @@ def test_resolve_commit_is_cached_across_repeated_calls(git_repo):
 
     rev_parse_calls = [c for c in spy.call_args_list if c.args[0][:2] == ["git", "rev-parse"]]
     assert len(rev_parse_calls) == 1  # not 10 (2 per call: revision + HEAD, x5 calls)
+
+
+def test_path_has_tracked_files_true_for_a_directory_with_files(git_repo):
+    repo_root = git_repo({"apps/app-1/deployment.yaml": "x"})
+    assert path_has_tracked_files(repo_root, "HEAD", "apps/app-1") is True
+
+
+def test_path_has_tracked_files_false_for_a_missing_path(git_repo):
+    repo_root = git_repo({"apps/app-1/deployment.yaml": "x"})
+    assert path_has_tracked_files(repo_root, "HEAD", "apps/does-not-exist") is False
+
+
+def test_path_has_tracked_files_does_not_confuse_a_prefix_collision(git_repo):
+    """`apps/app-1` and `apps/app-10` share a textual prefix but are
+    different directories -- a naive `str.startswith(pathspec)` (missing
+    the trailing `/`) would wrongly treat the second as covering the
+    first."""
+    repo_root = git_repo({"apps/app-10/deployment.yaml": "x"})
+    assert path_has_tracked_files(repo_root, "HEAD", "apps/app-1") is False
+
+
+def test_path_has_tracked_files_true_for_an_exact_file_path(git_repo):
+    repo_root = git_repo({"manifests/app.yaml": "x"})
+    assert path_has_tracked_files(repo_root, "HEAD", "manifests/app.yaml") is True
+
+
+def test_tree_paths_at_revision_is_cached_across_repeated_calls(git_repo):
+    """`phantom-target` used to run one `git ls-tree` per Application even
+    though most share `targetRevision: HEAD` -- confirmed for real: 40
+    Applications cost ~2.3s of it before this cache existed."""
+    repo_root = git_repo({"apps/app-1/deployment.yaml": "x"})
+    clear_caches()
+
+    with patch("subprocess.run", wraps=subprocess.run) as spy:
+        for _ in range(5):
+            assert path_has_tracked_files(repo_root, "HEAD", "apps/app-1") is True
+
+    ls_tree_calls = [c for c in spy.call_args_list if c.args[0][:2] == ["git", "ls-tree"]]
+    assert len(ls_tree_calls) == 1
+
+
+def test_clear_caches_picks_up_a_new_tree(git_repo, git_commit):
+    repo_root = git_repo({"apps/app-1/deployment.yaml": "x"})
+    clear_caches()
+    assert path_has_tracked_files(repo_root, "HEAD", "apps/app-2") is False
+
+    git_commit(repo_root, {"apps/app-2/deployment.yaml": "x"})
+    clear_caches()
+
+    assert path_has_tracked_files(repo_root, "HEAD", "apps/app-2") is True
+
+
+def test_tree_paths_at_revision_lists_every_file(git_repo):
+    repo_root = git_repo({"a.txt": "x", "dir/b.txt": "y"})
+    assert tree_paths_at_revision(repo_root, "HEAD") == frozenset({"a.txt", "dir/b.txt"})
 
 
 def test_clear_caches_picks_up_a_new_commit(git_repo, git_tag, git_commit):

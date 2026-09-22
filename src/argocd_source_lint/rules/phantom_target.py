@@ -5,8 +5,8 @@ from pathlib import Path
 from argocd_source_lint.git_context import (
     external_path_sources,
     is_revision_resolvable,
-    list_tree_paths,
     local_path_sources,
+    path_has_tracked_files,
 )
 from argocd_source_lint.models import Application, Finding, Severity
 from argocd_source_lint.policy import Policy
@@ -28,7 +28,6 @@ class PhantomTargetRule(Rule):
         severity = policy.rules.get(RULE_ID, Severity.ERROR)
         findings: list[Finding] = []
         revision_resolvable: dict[str, bool] = {}
-        target_exists: dict[tuple[str, str], bool] = {}
 
         for app in applications:
             for source in external_path_sources(app, local_origin):
@@ -56,12 +55,7 @@ class PhantomTargetRule(Rule):
                     )
                     continue
 
-                pathspec = source.path.strip("/") or "."
-                key = (revision, pathspec)
-                if key not in target_exists:
-                    target_exists[key] = bool(list_tree_paths(repo_root, revision, pathspec))
-
-                if not target_exists[key]:
+                if not path_has_tracked_files(repo_root, revision, source.path):
                     findings.append(
                         Finding(
                             rule_id=RULE_ID,

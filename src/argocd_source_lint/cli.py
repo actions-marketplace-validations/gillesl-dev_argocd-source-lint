@@ -14,6 +14,7 @@ from argocd_source_lint.baseline import (
     stale_baseline_entries,
     write_baseline,
 )
+from argocd_source_lint.coverage import clear_caches as clear_coverage_cache
 from argocd_source_lint.fsutil import clear_caches as clear_discovery_cache
 from argocd_source_lint.git_context import clear_caches as clear_git_caches
 from argocd_source_lint.git_context import get_origin_url, is_git_available
@@ -117,6 +118,7 @@ def lint(
 
     clear_git_caches()
     clear_discovery_cache()
+    clear_coverage_cache()
     policy = load_policy(repo_root)
     applications = RawManifestDiscovery().discover(repo_root)
     local_origin = get_origin_url(repo_root)

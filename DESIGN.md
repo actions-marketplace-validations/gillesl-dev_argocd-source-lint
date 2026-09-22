@@ -327,6 +327,88 @@ the two `UNVERIFIABLE` cases in `_resolve_git` that don't use the
 policy-configured severity. No behavior change — purely internal, no
 call site outside this file.
 
+## Caching an Application's own covered content
+
+`coverage.covered_files_for_application`/`covered_documents_for_application`
+are each called once per Application by every rule that reads that
+Application's covered files — five rules for the `_documents` form
+(`missing-ignore-diff`, `hpa-selfheal-conflict`, `unknown-sync-option`,
+`unknown-resource-hook`, `malformed-sync-wave`), two for the `_files`
+form (`orphan-source`, `double-coverage`). Each call independently
+re-walked the source directory and re-parsed every file in it — the
+exact same shape of redundancy as `_resolve_commit`'s before it was
+cached (see below), one layer closer to the filesystem. Confirmed for
+real: 40 Applications x 15 covered files each, across just the 3 of
+those 5 rules whose minimal test data happened to reach this path
+(the other two skip early on an Application-level precondition,
+e.g. `hpa-selfheal-conflict` without `selfHeal: true`), cost ~4.9s of
+pure re-walking and re-parsing.
+
+Fixed at the two places the repeated work actually happens, each
+cached by the value it depends on rather than by `Application`
+identity (an `Application` isn't hashable, and even if it were,
+caching by `id()` would reuse a stale entry once Python's allocator
+recycles a freed object's address — a real risk across the many
+small, independent test functions that build their own `Application`
+in the same pytest process, not just a theoretical one):
+
+- `fsutil.load_yaml_documents` now caches by the file's resolved path.
+  This alone also means a file `discover_documents` already parsed for
+  the top-level Application/ApplicationSet/AppProject scan is never
+  re-parsed again when a rule later reads it as covered content.
+- `coverage.covered_files_for_source` now caches by
+  `(source_dir.resolve(), directory_recurse, directory_include,
+  directory_exclude)` — the only inputs its result actually depends
+  on.
+
+Both reset via `clear_caches`, same story as every other cache here.
+
+## Batching `git ls-tree` by revision, not by path
+
+`phantom-target` asks, per Application, "does this source's `path`
+exist at `targetRevision`?" — before this, each question was its own
+`git ls-tree` subprocess call (`list_tree_paths`), even though most
+Applications in a real repo share `targetRevision: HEAD`. Confirmed
+for real: 40 Applications, each with a distinct `path` (so a per-rule
+cache keyed on `(revision, pathspec)`, already in place, still missed
+every time), cost ~2.3s of subprocess spawns — the same root cause as
+`_resolve_commit` before its cache, but shaped differently: here the
+*inputs* genuinely differ (40 distinct paths), so caching the exact
+same call can't help; the fix has to change *what's asked*.
+
+`git_context.tree_paths_at_revision(repo_root, revision)` now lists
+the *whole* tree once per `(repo_root, revision)` — cached the same
+way as `_resolve_commit` — and `path_has_tracked_files` answers the
+per-path question against that in-memory listing with a prefix check
+(`path == pathspec or path.startswith(pathspec + "/")`, careful to
+require the trailing `/` so `apps/app-1` doesn't wrongly match
+`apps/app-10`). This mirrors a pattern `broken-values-ref`'s own
+`_tree_paths` helper already used locally (fetch the whole tree once
+per revision, check membership many times) — now centralized so it's
+shared *across* rules too, not just within one rule's own `check()`.
+One real caveat, not a hidden assumption: this replicates git's
+pathspec matching for a literal path, not a glob — a `source.path`
+containing `*`/`?`/`[` (not a real ArgoCD value in practice) would be
+treated literally here where `git ls-tree` itself would expand it.
+
+## Guarding against a rule nobody wired up
+
+`cli.RULES` is a manually maintained list — deliberate, matching how
+mature linters (ruff, flake8) register rules explicitly rather than
+via import-time side effects, for predictable ordering and no
+"importing this module silently changes what runs" surprise. The gap
+isn't the manual list itself, but that nothing checked it stayed
+complete: a new `Rule` subclass, fully unit-tested on its own
+(instantiated directly, `.check()` called directly), could be merged
+without ever being added to `RULES` and the full suite would stay
+green — the CLI would simply never run it. Confirmed for real, not
+hypothetical: a throwaway rule module built to test this left every
+existing test passing.
+`test_every_rule_class_is_registered_in_cli_rules` force-imports every
+module under `rules/` (`pkgutil.iter_modules`, since a rule nobody
+already imports would otherwise stay invisible to
+`Rule.__subclasses__()`) and asserts the two sets match.
+
 ## `Finding.line`
 
 Populating it requires knowing where in the YAML a given field actually

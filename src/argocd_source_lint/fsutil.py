@@ -122,17 +122,38 @@ def iter_yaml_files(directory: Path, *, recurse: bool = True) -> Iterator[Path]:
             yield path
 
 
+_LOADED_DOCUMENTS_CACHE: dict[Path, list[dict[str, Any]]] = {}
+
+
 def load_yaml_documents(path: Path) -> list[dict[str, Any]]:
     """All valid YAML documents in a file (potentially multi-document). A
     file that fails to parse (e.g. a Helm template using Go syntax), or
     a YAML alias bomb that would blow past `is_within_budget`, simply
-    returns an empty list instead of raising or hanging."""
+    returns an empty list instead of raising or hanging.
+
+    Cached by resolved path, for the same reason and under the same
+    `clear_caches` reset as `discover_documents` below: `coverage.py`'s
+    per-Application `covered_documents_for_application` re-walks and
+    re-parses that Application's own source directory independently for
+    every rule that reads it (five of them) -- confirmed for real, not
+    estimated: 40 Applications x 15 covered files each x 3 rules that
+    actually reached this path in a minimal repro still cost ~4.9s of
+    pure re-parsing. Caching here (rather than in `coverage.py`) also
+    means a file `discover_documents` already parsed for the top-level
+    Application/ApplicationSet/AppProject scan is never re-parsed again
+    when a rule later reads it as covered content."""
+    resolved = path.resolve()
+    if resolved in _LOADED_DOCUMENTS_CACHE:
+        return _LOADED_DOCUMENTS_CACHE[resolved]
+
     try:
         with path.open("r", encoding="utf-8") as f:
             docs = list(_yaml.load_all(f))
     except (YAMLError, UnicodeDecodeError):
-        return []
-    return [doc for doc in docs if isinstance(doc, dict) and is_within_budget(doc)]
+        docs = []
+    result = [doc for doc in docs if isinstance(doc, dict) and is_within_budget(doc)]
+    _LOADED_DOCUMENTS_CACHE[resolved] = result
+    return result
 
 
 _DISCOVERED_DOCUMENTS_CACHE: dict[Path, list[tuple[Path, dict[str, Any]]]] = {}
@@ -166,7 +187,9 @@ def discover_documents(repo_root: Path) -> list[tuple[Path, dict[str, Any]]]:
 
 
 def clear_caches() -> None:
-    """Resets `discover_documents`' cache -- called once at the start of
-    `cli.lint`, so each CLI invocation starts clean rather than this
-    persisting for the life of the process."""
+    """Resets `discover_documents`' and `load_yaml_documents`' caches --
+    called once at the start of `cli.lint`, so each CLI invocation
+    starts clean rather than either persisting for the life of the
+    process."""
     _DISCOVERED_DOCUMENTS_CACHE.clear()
+    _LOADED_DOCUMENTS_CACHE.clear()

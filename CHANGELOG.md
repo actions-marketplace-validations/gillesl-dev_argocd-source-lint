@@ -3,6 +3,47 @@
 All notable changes to this project are documented in this file, in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.31] - 2026-09-22
+
+### Fixed
+
+- Five rules (`missing-ignore-diff`, `hpa-selfheal-conflict`,
+  `unknown-sync-option`, `unknown-resource-hook`, `malformed-sync-wave`)
+  and two more (`orphan-source`, `double-coverage`) each independently
+  re-walked and re-parsed the same Application's covered source
+  directory — confirmed for real: 40 Applications x 15 covered files
+  each, across just 3 of those rules, cost ~4.9s of pure re-walking and
+  re-parsing. `fsutil.load_yaml_documents` now caches by resolved file
+  path and `coverage.covered_files_for_source` caches by
+  `(source_dir, directory_recurse, directory_include,
+  directory_exclude)` — both reset via `clear_caches`, same story as
+  every other cache here.
+- `phantom-target` ran one `git ls-tree` subprocess per Application to
+  check its `path` exists at `targetRevision`, even though most
+  Applications in a real repo share the same revision — confirmed for
+  real: 40 Applications with distinct paths cost ~2.3s of subprocess
+  spawns. `git_context.tree_paths_at_revision` now lists the whole tree
+  once per `(repo_root, revision)`, and `path_has_tracked_files`
+  answers the per-path question against that in-memory listing instead.
+  `broken-values-ref`'s own equivalent local cache is now backed by the
+  same shared one.
+- A `Rule` subclass that exists under `rules/` but is never added to
+  `cli.RULES` stayed invisible to the whole test suite: its own unit
+  test instantiates and calls it directly, so it could pass while the
+  real CLI never ran it at all. Confirmed for real with a throwaway
+  rule module. `test_every_rule_class_is_registered_in_cli_rules`
+  force-imports every module under `rules/` and asserts none are
+  missing from `RULES`.
+
+### Changed
+
+- `orphan-source` imported `broken_values_ref.py`'s `_parse_ref_entry`
+  across module boundaries despite its underscore signaling "private" —
+  it already was shared, just not admitting it. Renamed to
+  `parse_ref_entry`, and the `{source.ref: source for source in
+  app.sources if source.ref}` comprehension duplicated verbatim in both
+  files is now the shared `ref_sources_by_name`. No behavior change.
+
 ## [0.1.30] - 2026-09-21
 
 ### Changed

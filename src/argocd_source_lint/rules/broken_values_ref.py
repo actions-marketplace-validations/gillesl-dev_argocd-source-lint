@@ -5,7 +5,7 @@ from pathlib import Path
 from argocd_source_lint.git_context import (
     is_local_repo_url,
     is_revision_resolvable,
-    list_tree_paths,
+    tree_paths_at_revision,
 )
 from argocd_source_lint.models import Application, Finding, Severity, Source
 from argocd_source_lint.policy import Policy
@@ -27,10 +27,9 @@ class BrokenValuesRefRule(Rule):
         severity = policy.rules.get(RULE_ID, Severity.ERROR)
         findings: list[Finding] = []
         revision_resolvable: dict[str, bool] = {}
-        tree_paths: dict[str, set[str]] = {}
 
         for app in applications:
-            ref_sources = {source.ref: source for source in app.sources if source.ref}
+            ref_sources = ref_sources_by_name(app)
 
             for source in app.sources:
                 for idx, entry in enumerate(source.helm_value_files):
@@ -40,7 +39,7 @@ class BrokenValuesRefRule(Rule):
                         else None
                     )
 
-                    ref_name, rel_path = _parse_ref_entry(entry)
+                    ref_name, rel_path = parse_ref_entry(entry)
                     if ref_name is None:
                         findings.extend(
                             _check_plain_entry(
@@ -52,7 +51,6 @@ class BrokenValuesRefRule(Rule):
                                 local_origin,
                                 severity,
                                 revision_resolvable,
-                                tree_paths,
                             )
                         )
                         continue
@@ -101,7 +99,7 @@ class BrokenValuesRefRule(Rule):
                         )
                         continue
 
-                    if rel_path not in _tree_paths(repo_root, revision, tree_paths):
+                    if rel_path not in tree_paths_at_revision(repo_root, revision):
                         findings.append(
                             _finding(
                                 app,
@@ -115,14 +113,6 @@ class BrokenValuesRefRule(Rule):
         return findings
 
 
-def _tree_paths(repo_root: Path, revision: str, cache: dict[str, set[str]]) -> set[str]:
-    """Lists the files of a revision only once (cached), instead of one
-    `git ls-tree` call per referenced `$ref/path.yaml` entry."""
-    if revision not in cache:
-        cache[revision] = set(list_tree_paths(repo_root, revision, "."))
-    return cache[revision]
-
-
 def _check_plain_entry(
     app: Application,
     source: Source,
@@ -132,7 +122,6 @@ def _check_plain_entry(
     local_origin: str | None,
     severity: Severity,
     revision_resolvable: dict[str, bool],
-    tree_paths: dict[str, set[str]],
 ) -> list[Finding]:
     """A plain (non-`$ref`) `helm.valueFiles` entry, resolved relative to
     this source's own `path` -- the common case, and a real gap
@@ -161,7 +150,7 @@ def _check_plain_entry(
         ]
 
     full_path = f"{source.path.rstrip('/')}/{entry}"
-    if full_path in _tree_paths(repo_root, revision, tree_paths):
+    if full_path in tree_paths_at_revision(repo_root, revision):
         return []
 
     return [
@@ -176,13 +165,25 @@ def _check_plain_entry(
     ]
 
 
-def _parse_ref_entry(entry: str) -> tuple[str | None, str]:
+def parse_ref_entry(entry: str) -> tuple[str | None, str]:
+    """`$ref_name/rel/path.yaml` -> `(ref_name, "rel/path.yaml")`, or
+    `(None, "")` for a plain (non-`$ref`) entry. Public: also used by
+    `orphan-source`, which needs to recognize the same `$ref` entries to
+    know a values file is covered even when its own source has no
+    `path` (see DESIGN.md)."""
     if not entry.startswith("$"):
         return None, ""
     ref_name, separator, rel_path = entry[1:].partition("/")
     if not separator:
         return None, ""
     return ref_name, rel_path
+
+
+def ref_sources_by_name(app: Application) -> dict[str, Source]:
+    """`app`'s own sources that declare `ref:`, indexed by that name --
+    how a `$ref_name/...` entry resolves to the source it points at.
+    Public for the same reason as `parse_ref_entry`."""
+    return {source.ref: source for source in app.sources if source.ref}
 
 
 def _finding(
