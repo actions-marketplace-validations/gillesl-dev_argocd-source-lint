@@ -1,1133 +1,389 @@
 # Design notes
 
-Background on the non-obvious decisions the code and its comments refer
-back to. If you're reading a comment that says "see DESIGN.md", this is
-where it's explained.
+Background for the non-obvious decisions referenced by the code. If a comment says
+"see DESIGN.md", this is where the reasoning lives.
 
 ## Mono-repo v1 scope
 
-The tool only verifies `Application` sources whose `repoURL` matches the
-repo it's running in (detected via `git remote get-url origin`). This is
-what makes it a pure filesystem/git walker with no network access, no
-credentials, and no caching layer: it can run in any CI job that already
-has a checkout, with no extra permissions.
+The tool verifies `Application` sources whose `repoURL` matches the checkout detected
+with `git remote get-url origin`. That keeps v1 local: filesystem and Git access only,
+with no cluster credentials or network fetches.
 
-Sources pointing at a different repo are never silently skipped — they're
-detected and reported as `info` ("out of scope v1 — manual verification
-required"), never checked and never ignored without a trace. An
-Application can mix local and external sources in the same
-`spec.sources` list; each source is classified independently
-(`git_context.local_path_sources`/`external_path_sources`), so a genuinely
-local source is still fully checked even when a sibling source in the
-same Application is external.
+External sources are still reported as `info`. Sources are classified independently
+through `git_context.local_path_sources`/`external_path_sources`, so mixed
+`spec.sources` entries still get full checks for their local parts.
 
-Verifying external-repo sources for real (cloning them, caching by
-`repoURL` + `targetRevision`) is a natural v2, not a hidden limitation.
+External-repository cloning and caching by `repoURL` + `targetRevision` is a future
+extension.
 
 ## Requiring `git` on PATH, loudly
 
-Every rule that resolves a source ultimately shells out to `git`
-(`git_context.py`: revision lookups, tree listings, the
-`targetRevision`-drift snapshot) — but until this was caught, only
-`get_origin_url` handled a missing binary at all, and it did so by
-returning `None`, the exact same value it returns for a repo with no
-`origin` remote configured. Every rule already treats that `None` as
-"nothing here is local," which is correct for a missing remote and
-silently wrong for a missing `git`: every source gets misclassified as
-external, `orphan-source`/`double-coverage` flood with false "not
-covered" errors on files that *are* covered, instead of a clear error
-pointing at the actual cause. Reproduced against `python:3.11-slim` —
-the base image this repo's own `templates/lint.yml` recommended, which
-doesn't ship `git` (fixed there too, alongside this).
+Rules depend on Git for revision lookups, tree listings and snapshots. A missing binary
+used to look like a repository with no `origin`, causing local sources to be
+misclassified as external and producing misleading coverage findings.
 
-`cli.py` now checks `git_context.is_git_available()` once, at startup,
-before anything else runs, and exits loudly (code `2`, same as the
-"path not found" case) instead of letting the degraded behavior above
-happen at all.
+This was reproduced with `python:3.11-slim`. The CLI now checks
+`git_context.is_git_available()` at startup and exits with code `2` if Git is missing.
+`templates/lint.yml` installs Git as well.
 
 ## `directory.recurse`/`include`/`exclude` semantics
 
-`orphan-source` and `missing-ignore-diff` both need to know exactly which
-files a `path` source covers. The behavior implemented in `coverage.py`
-matches real ArgoCD behavior, confirmed against the official docs rather
-than assumed:
+Coverage in `coverage.py` follows ArgoCD's directory behavior:
 
-- `directory.recurse` defaults to `false` — only the files at the root of
-  `path` are covered, not subdirectories, unless `recurse: true` is set
-  explicitly.
-- `directory.include`/`exclude` is a glob pattern, or several comma
-  separated ones wrapped in braces (`{a,b}`), matched against the path
-  relative to the source's `path`. Matched with `fnmatch.fnmatchcase`,
-  not the case-insensitive-on-Windows `fnmatch.fnmatch`: ArgoCD's own Go
-  `filepath.Match` never folds case on any platform, so a repo checked
-  out on a case-sensitive CI runner and linted locally on Windows must
-  agree on the result — same reasoning as `project-scope-violation`'s
-  `destination` matching below. `.argocd-lint.yaml`'s own `exclude_paths`
-  (`orphan-source`) is matched the same way, for the same reason.
-- A `path` containing a `Chart.yaml` is treated as opaque and considered
-  fully covered rather than partially interpreted — rendering a Helm
-  chart's templates is out of scope for v1 (delegate to `helm template`/a
-  dedicated linter), so guessing at their contents would just produce
-  noise on a directory the tool can't actually interpret.
-- A `path` containing a `kustomization.yaml` (or `.yml`/no extension) is
-  **not** opaque: `coverage.py` parses it (`resources`/`bases`/
-  `components`/`crds`, recursing into a directory reference;
-  `patches`/`patchesStrategicMerge`/`patchesJson6902`;
-  `configMapGenerator`/`secretGenerator` `files`/`envs`/`envFile`) and
-  marks only what's actually referenced as covered — a manifest sitting
-  in the overlay but never listed is a real `orphan-source` finding, the
-  same signal as an unreferenced file in a plain directory source, one
-  level deeper. A reference that doesn't resolve to a local file/directory
-  (a git URL, an SCM shorthand) is silently skipped rather than guessed
-  at or flagged: verifying a remote resource is out of scope, same
-  principle as an external `Application` source.
+- `directory.recurse` defaults to `false`;
+- `directory.include`/`exclude` uses case-sensitive glob matching through
+  `fnmatch.fnmatchcase`;
+- `.argocd-lint.yaml` `exclude_paths` uses the same case-sensitive behavior;
+- directories containing `Chart.yaml` are opaque because Helm rendering is outside v1;
+- Kustomize directories are parsed for local resources, bases, components, CRDs,
+  patches and generator file references.
+
+Remote Kustomize references are skipped because they cannot be verified from the
+checkout.
 
 ## SARIF vs GitLab Code Quality
 
-These are two distinct schemas, not two names for the same thing. SARIF
-(`reporters/sarif.py`) is what GitHub code scanning consumes; GitLab's
-"Code Quality" MR widget (`reporters/gitlab_codequality.py`) consumes a
-CodeClimate-derived format instead (`severity: info|minor|major|critical`,
-`fingerprint`, `location.lines.begin`) — hence two separate reporters
-rather than one shared SARIF-based implementation.
+SARIF and GitLab Code Quality are different schemas. GitHub code scanning consumes
+SARIF; GitLab's widget consumes a CodeClimate-derived format. Separate reporters keep
+each output aligned with the platform that reads it.
 
 ## Keeping the reporters aligned with each format's real-world conventions
 
-An audit against each format's own current documentation (not the state
-they were originally written against) turned up three gaps:
+SARIF now uses the stable `sarif-2.1.0` schema, includes `partialFingerprints`, and
+shares `stable_fingerprint` with GitLab Code Quality. The fingerprint is based on rule,
+file, Application and message. SARIF metadata also includes `fullDescription`,
+`helpUri` and `defaultConfiguration.level`.
 
-- SARIF's `$schema` pointed at
-  `raw.githubusercontent.com/oasis-tcs/sarif-spec/master/...` — the spec
-  repo's mutable `master` branch, not a stable release. GitHub's own docs
-  recommend `https://json.schemastore.org/sarif-2.1.0.json` instead.
-- SARIF results had no `partialFingerprints` — GitHub's code scanning
-  docs call this "essential" for matching the same finding across runs;
-  without it, an unrelated change anywhere in the run can make GitHub
-  treat every finding as a brand-new alert instead of the same one
-  persisting. `reporters/fingerprint.py` (`stable_fingerprint`) is now
-  shared between SARIF's `partialFingerprints.primaryLocationLineHash`
-  and GitLab Code Quality's `fingerprint` — same stability requirement
-  (content-based: rule + file + application + message, not list
-  position), previously implemented independently in
-  `gitlab_codequality.py` alone. Rules also gained `fullDescription`,
-  `helpUri` (the README's rule table) and `defaultConfiguration.level`
-  (from `policy.DEFAULT_RULE_SEVERITIES`) — all recommended fields
-  GitHub's UI uses for filtering/detail pages, previously omitted.
-- GitLab's own JUnit docs state a hard gotcha: "If you have duplicate
-  test names, only the first test is used and others with the same name
-  are ignored" — silent data loss, not a rendering quirk. The JUnit
-  reporter's `<testcase name=...>` was the finding's raw message, and
-  two *different* findings (different file/Application) can share that
-  message verbatim (e.g. the same copy-pasted typo in two Applications'
-  manifests). `junit.py` now appends `(#N)` on an exact repeat within one
-  render so every finding stays visible in GitLab's parsed report.
+JUnit needed a different fix: GitLab drops duplicate testcase names after the first.
+`junit.py` now appends `(#N)` to repeated names so every finding remains visible.
 
-GitLab Code Quality itself needed no change: `description`, `check_name`,
-`fingerprint`, `severity`, `location.path`, `location.lines.begin` are
-exactly the fields GitLab's own docs say it actually processes.
+GitLab Code Quality itself already matched the fields GitLab processes:
+`description`, `check_name`, `fingerprint`, `severity`, `location.path`, and
+`location.lines.begin`.
 
 ## The JUnit reporter's severity mapping
 
-JUnit XML (`reporters/junit.py`) has no native "warning"/"info" level —
-only a passing testcase, `<failure>`, `<error>`, or `<skipped>`. One
-`<testcase>` per finding, mapped to match this tool's own exit-code
-semantics rather than inventing a separate scale: `error` and
-`unverifiable` (the two severities that actually block CI by default,
-see `cli._exit_code`) become `<failure>`; `warning`/`info` become
-`<skipped>` rather than a silent pass — they're still something to look
-at, and a skipped testcase renders visually distinct (grey, not green)
-in Jenkins/GitLab/Azure DevOps alike. Deliberately not policy-aware
-(doesn't consult `unverifiable_blocks_ci`): every other reporter here
-(SARIF, GitLab Code Quality) already maps `unverifiable` to a fixed
-level regardless of whether it currently blocks CI, so this follows the
-same established precedent instead of being the one exception.
+JUnit has no warning/info level. Each finding becomes one testcase:
+
+- `error` and `unverifiable` become `<failure>`;
+- `warning` and `info` become `<skipped>`.
+
+This mirrors the tool's default blocking semantics while keeping non-blocking findings
+visibly distinct. The reporter does not consult `unverifiable_blocks_ci`: severity-to-JUnit
+mapping stays fixed, like the SARIF and GitLab Code Quality reporters, even when policy changes
+whether `unverifiable` blocks the CLI.
 
 ## The `unverifiable` severity
 
-A shallow, single-branch CI checkout (common in CI jobs) may not have a
-`targetRevision` fetched locally. `phantom-target` and `broken-values-ref`
-both need to distinguish "this path genuinely doesn't exist" from "I
-can't tell, the revision isn't fetched" — conflating the two would either
-produce false errors on legitimate branches, or silently stop verifying
-anything on an incomplete checkout without anyone noticing.
+A shallow checkout may not contain a referenced branch or tag. In that case the tool
+must distinguish "target missing" from "cannot verify with this checkout."
 
-`unverifiable` blocks CI by default (`unverifiable_blocks_ci: true`)
-precisely because the silent-failure mode is worse than a noisy one: a
-misconfigured shallow clone should be loud, not a quiet blind spot that
-looks identical to "everything's fine."
+`unverifiable` blocks by default (`unverifiable_blocks_ci: true`) so an incomplete CI
+checkout does not look like a clean result.
 
 ## The baseline file
 
-Adopting the tool on an existing, large mono-repo almost always surfaces
-pre-existing issues (decommissioned components never archived, manifests
-applied out-of-band and never brought under GitOps) that are legitimate
-findings but not something a team can fix before the next commit. Without
-a way to accept them, day one of adoption is "CI is red and stays red
-until someone clears a backlog" — which either blocks adoption outright or
-gets the tool disabled at the first friction.
+`.argocd-lint-baseline.yaml` supports adoption on repositories with known legacy
+findings. `--write-baseline` records `rule_id`, `file`, `application` and `message`;
+later runs suppress exact matches while keeping new findings visible.
 
-`.argocd-lint-baseline.yaml` (`baseline.py`) is a flat, plain-YAML list of
-accepted findings (`rule_id`, `file`, `application`, `message` — no
-opaque hash, so a reviewer can read a PR diff to it and understand exactly
-what's being accepted and why). `--write-baseline` snapshots every current
-finding into it in one shot; from then on, only *new* findings (not an
-exact match in the baseline) are reported and affect the exit code — a
-suppressed count is still printed to stderr so the baseline never silently
-hides that it's doing something.
-
-The match is exact on all four fields, deliberately no fuzzy/partial
-matching: a change to the finding's message (e.g. the path shifting after
-a rename) makes it "new" again rather than silently staying suppressed
-forever under a stale description. This mirrors what
-`reporters/fingerprint.py`'s hash already does for SARIF/GitLab Code
-Quality (same four fields, same content-based stability) — but the
-baseline file deliberately keeps its own separate, human-readable
-implementation rather than reusing that opaque MD5: a reviewer reading a
-PR diff to `.argocd-lint-baseline.yaml` needs the fields spelled out,
-not a hash, so unifying the two would only add an indirection this side
-needs to reverse right back.
-
-The reverse problem exists too: an entry accepted once but never
-revisited, for an issue since fixed, renamed, or removed, still sits in
-the file forever — a baseline that only ever grows stops being
-something a reviewer can actually read. `stale_baseline_entries`
-(`baseline.py`) reports a count of exactly this to stderr on every run
-(never affecting the exit code — a stale entry is dead weight, not a
-new risk), nudging towards re-running `--write-baseline` to drop them.
-It's deliberately a nudge, not an enforced check: some teams may want
-their baseline to *stay* stable across a temporary dip in findings, and
-a hard failure here would fight that.
+The file stays human-readable instead of reusing reporter hashes. Stale entries are
+reported but do not fail CI.
 
 ## YAML alias bombs
 
-A YAML anchor referenced twice by a later anchor, `N` layers deep,
-expands to `2^N` nodes if anything ever fully materializes it — a
-"billion laughs" document, a few hundred bytes on disk. Confirmed for
-real, not assumed: a 724-byte params file (`clusters/prod.json` matched
-by an ApplicationSet `git` generator's `files:` pattern, straight out
-of the upstream docs' own example) hung `argocd-source-lint`
-indefinitely, and a manifest with a bombed `apiVersion` field did too.
+A densely aliased YAML document can be tiny on disk but expand exponentially when
+walked or stringified. A 724-byte params file reproduced this and hung the linter.
 
-`ruamel.yaml`'s own loader is safe — an alias resolves to the *same*
-object, not a copy, confirmed empirically — so parsing itself never
-hangs. The danger is entirely downstream: the moment something
-stringifies or walks the result without knowing it may be densely
-aliased. Two call sites did exactly that: `applicationset._flatten_params`
-called `str()` on a list-valued param (a git `files:` params file is
-meant to hold plain, flat data — never expected to contain aliases at
-all), and five separate `str(doc.get("apiVersion", ""))`-style
-coercions across `loader.py`/`app_projects.py`/`applicationset.py`/
-`hpa_selfheal_conflict.py`/`missing_ignore_diff.py` all shared the
-exact same unguarded pattern.
-
-Rather than patching each stringification site defensively (this
-audit alone found five nearly-identical instances — easy to miss the
-next one), the fix sits at the one place virtually every document here
-is read through: `fsutil.load_yaml_documents` now rejects a document
-whose *fully expanded* size would exceed a generous budget
-(`is_within_budget`, 1,000,000 nodes — far more than any real manifest
-needs, far below what a bomb reaches within a handful of anchor
-layers), the same way it already silently drops a file that fails to
-parse outright. Computed via memoized recursion keyed by `id()`: an
-aliased subtree's size is computed once and reused for every later
-reference to it — the same reuse that keeps the bomb small on disk in
-the first place, so the check itself never re-does the exponential
-work it's guarding against. `applicationset._load_params_file` reads
-its own params files independently of `fsutil.py` (a `files:` target
-isn't a `kind: Application`-shaped document), so it calls the same
-`is_within_budget` directly rather than being covered for free.
+`is_within_budget` rejects documents whose fully expanded size exceeds 1,000,000 nodes.
+The calculation is memoized by object identity, so the guard itself stays cheap.
+ApplicationSet params files apply the same budget explicitly.
 
 ## A directory symlink/junction cycle
 
-A directory symlink pointing back at one of its own ancestors is a
-few-KB structure that makes a naive recursive walk run forever —
-confirmed for real (not assumed) on Windows with a junction (Windows'
-other reparse-point type for a directory, distinct from a symlink —
-`Path.is_symlink()` is `False` for one, same as a real symlink would
-be for `os.walk`). Neither `Path.rglob` nor `os.walk(directory,
-followlinks=False)` protect against it: the latter's guard only
-recognizes a POSIX-style symlink, and a Windows junction isn't
-reported as one, so it gets followed regardless of the flag.
+A directory link back to an ancestor can make recursive discovery run forever. This was
+reproduced on Windows with a junction: `Path.is_symlink()` returns `False` for that case, and
+`os.walk(..., followlinks=False)` still follows it because the junction is not reported as a
+regular symlink.
 
-`fsutil.py` previously walked with bare `Path.rglob`/`Path.glob`
-(`iter_yaml_files`) and `Path.rglob("*")`
-(`applicationset._list_local_directories`/`_list_local_files`, the
-`git` ApplicationSet generator's own discovery) — three independent,
-unguarded call sites. `fsutil.walk_tree` replaces all three with one
-shared, cycle-safe recursive walk: each directory is resolved once
-(`Path.resolve()`, the same identity-tracking already used by
-`coverage.covered_files_for_kustomize_dir` for a Kustomize `resources:`
-cycle) and never re-descended into. A side effect, not the goal: a
-file reachable through two *different*, non-cyclic logical paths to
-the same physical directory (an ordinary symlink used for reuse, not a
-loop) is now only found once per traversal too, rather than double-
-counted — not something this pass set out to fix, but a strict
-improvement over the previous behavior either way.
+`fsutil.walk_tree` resolves each directory once and never descends into the same
+physical directory twice.
 
 ## Caching `git rev-parse` for the life of one CLI run
 
-`revision_matches_checkout` (via `coverage._resolved_source_root`) runs
-once per local source, per rule that resolves one — with N such rules
-and every source sharing the same `targetRevision` (`HEAD`, the
-overwhelming common case), that's N identical `git rev-parse` calls
-for the exact same answer, repeated per Application. Confirmed for
-real, not estimated: 50 Applications, all `targetRevision: HEAD`, cost
-702 of the 754 `git` subprocess calls in a full run — about 58 seconds
-on Windows, where subprocess spawn itself dominates the cost, not
-`git`'s own work.
+With 50 Applications all using `targetRevision: HEAD`, 702 of 754 Git subprocesses were
+identical `git rev-parse` calls, costing about 58 seconds on Windows.
 
-`git_context._resolve_commit` now caches by `(repo_root, revision)`,
-collapsing those 702 calls to 1. The cache is process-lifetime module
-state, same as `materialize_revision`'s own `_REVISION_SNAPSHOT_CACHE`
-— safe in real usage (one OS process per `argocd-source-lint`
-invocation, and a repo's history never changes mid-run since nothing
-here writes to it), but a test harness calling the CLI twice
-in-process against a repo it mutates between calls (`git_commit`
-between two `CliRunner.invoke`s sharing one Python process) would
-otherwise see the first call's stale answer on the second. `clear_caches`
-resets both caches; `cli.lint` calls it once at the very start of every
-invocation, so this only ever matters for that in-process-test
-scenario, never for a real run.
+`git_context._resolve_commit` now caches by `(repo_root, revision)`, reducing those
+702 calls to 1 and the measured run to about 5 seconds. `clear_caches` resets state at
+the start of each CLI invocation.
 
 ## Sharing one discovery pass across Application/ApplicationSet/AppProject
 
-`RawManifestDiscovery`, `applicationset.discover` and
-`discover_app_projects` each walk the entire repo and parse every YAML
-file looking for one specific `kind` — three independent, full passes
-over the same files for what only ever needs one. Confirmed for real:
-2,000 plain manifests (zero Applications/ApplicationSets/AppProjects
-among them, the worst case for this — every file gets fully walked and
-parsed three times for nothing) cost ~5s total across the three passes.
+Manifest, ApplicationSet and AppProject discovery used to walk and parse the repository
+separately. With 2,000 plain manifests, the three passes cost about 5 seconds.
 
-`fsutil.discover_documents` now does that walk once, returning every
-`(manifest_path, doc)` pair; the three callers just filter it by
-`kind` instead of re-walking. Cached by `repo_root`, same scoping and
-same reasoning as `_resolve_commit`'s cache above (life of one CLI
-invocation, reset via `clear_caches`) — every existing call site's own
-signature (`RawManifestDiscovery().discover(repo_root)`,
-`applicationset.discover(repo_root, ...)`,
-`discover_app_projects(repo_root)`) is unchanged, so this stayed
-purely internal to `fsutil.py` and the three call sites, no test outside
-`test_fsutil.py` needed to change.
+`fsutil.discover_documents` now performs one cached pass per `repo_root`, and callers
+filter the shared results by `kind`.
 
 ## `GeneratorContext`
 
-`_resolve_generator`, `_resolve_git`, `_resolve_matrix` and
-`_resolve_merge` all needed the exact same five things alongside their
-own generator dict — `repo_root`, `local_origin`, `appset_name`,
-`source_file`, `severity` — threaded unchanged through every level of
-the recursion (`matrix`/`merge` calling back into `_resolve_generator`
-for each child). A plain `@dataclass(frozen=True, slots=True)` (not a
-pydantic `BaseModel`: this never crosses a validation boundary, it's
-purely an internal parameter bundle, so pulling in validation overhead
-for it would blur the line with `models.py`'s actual role) replaces
-those five repeated positional parameters with one `ctx`, and
-`_finding(ctx, message, severity=...)` takes an optional override for
-the two `UNVERIFIABLE` cases in `_resolve_git` that don't use the
-policy-configured severity. No behavior change — purely internal, no
-call site outside this file.
+ApplicationSet resolver functions repeatedly passed the same five values:
+`repo_root`, `local_origin`, `appset_name`, `source_file` and `severity`.
+
+A frozen, slotted `GeneratorContext` dataclass now bundles them. It is internal and has
+no behavioral effect.
 
 ## Caching an Application's own covered content
 
-`coverage.covered_files_for_application`/`covered_documents_for_application`
-are each called once per Application by every rule that reads that
-Application's covered files — five rules for the `_documents` form
-(`missing-ignore-diff`, `hpa-selfheal-conflict`, `unknown-sync-option`,
-`unknown-resource-hook`, `malformed-sync-wave`), two for the `_files`
-form (`orphan-source`, `double-coverage`). Each call independently
-re-walked the source directory and re-parsed every file in it — the
-exact same shape of redundancy as `_resolve_commit`'s before it was
-cached (see below), one layer closer to the filesystem. Confirmed for
-real: 40 Applications x 15 covered files each, across just the 3 of
-those 5 rules whose minimal test data happened to reach this path
-(the other two skip early on an Application-level precondition,
-e.g. `hpa-selfheal-conflict` without `selfHeal: true`), cost ~4.9s of
-pure re-walking and re-parsing.
+Several rules re-read the same covered files. In one profile, 40 Applications with
+15 covered files each cost about 4.9 seconds across only three rules.
 
-Fixed at the two places the repeated work actually happens, each
-cached by the value it depends on rather than by `Application`
-identity (an `Application` isn't hashable, and even if it were,
-caching by `id()` would reuse a stale entry once Python's allocator
-recycles a freed object's address — a real risk across the many
-small, independent test functions that build their own `Application`
-in the same pytest process, not just a theoretical one):
-
-- `fsutil.load_yaml_documents` now caches by the file's resolved path.
-  This alone also means a file `discover_documents` already parsed for
-  the top-level Application/ApplicationSet/AppProject scan is never
-  re-parsed again when a rule later reads it as covered content.
-- `coverage.covered_files_for_source` now caches by
-  `(source_dir.resolve(), directory_recurse, directory_include,
-  directory_exclude)` — the only inputs its result actually depends
-  on.
-
-Both reset via `clear_caches`, same story as every other cache here.
+`fsutil.load_yaml_documents` now caches by resolved file path, and
+`coverage.covered_files_for_source` caches by the source directory plus its directory
+options. Both are reset by `clear_caches`.
 
 ## Batching `git ls-tree` by revision, not by path
 
-`phantom-target` asks, per Application, "does this source's `path`
-exist at `targetRevision`?" — before this, each question was its own
-`git ls-tree` subprocess call (`list_tree_paths`), even though most
-Applications in a real repo share `targetRevision: HEAD`. Confirmed
-for real: 40 Applications, each with a distinct `path` (so a per-rule
-cache keyed on `(revision, pathspec)`, already in place, still missed
-every time), cost ~2.3s of subprocess spawns — the same root cause as
-`_resolve_commit` before its cache, but shaped differently: here the
-*inputs* genuinely differ (40 distinct paths), so caching the exact
-same call can't help; the fix has to change *what's asked*.
+`phantom-target` used to run one `git ls-tree` per Application path. With 40 distinct
+paths sharing one revision, subprocess startup alone cost about 2.3 seconds.
 
-`git_context.tree_paths_at_revision(repo_root, revision)` now lists
-the *whole* tree once per `(repo_root, revision)` — cached the same
-way as `_resolve_commit` — and `path_has_tracked_files` answers the
-per-path question against that in-memory listing with a prefix check
-(`path == pathspec or path.startswith(pathspec + "/")`, careful to
-require the trailing `/` so `apps/app-1` doesn't wrongly match
-`apps/app-10`). This mirrors a pattern `broken-values-ref`'s own
-`_tree_paths` helper already used locally (fetch the whole tree once
-per revision, check membership many times) — now centralized so it's
-shared *across* rules too, not just within one rule's own `check()`.
-One real caveat, not a hidden assumption: this replicates git's
-pathspec matching for a literal path, not a glob — a `source.path`
-containing `*`/`?`/`[` (not a real ArgoCD value in practice) would be
-treated literally here where `git ls-tree` itself would expand it.
+`tree_paths_at_revision` now lists the full tree once per revision, and
+`path_has_tracked_files` answers path checks from memory.
 
 ## Guarding against a rule nobody wired up
 
-`cli.RULES` is a manually maintained list — deliberate, matching how
-mature linters (ruff, flake8) register rules explicitly rather than
-via import-time side effects, for predictable ordering and no
-"importing this module silently changes what runs" surprise. The gap
-isn't the manual list itself, but that nothing checked it stayed
-complete: a new `Rule` subclass, fully unit-tested on its own
-(instantiated directly, `.check()` called directly), could be merged
-without ever being added to `RULES` and the full suite would stay
-green — the CLI would simply never run it. Confirmed for real, not
-hypothetical: a throwaway rule module built to test this left every
-existing test passing.
-`test_every_rule_class_is_registered_in_cli_rules` force-imports every
-module under `rules/` (`pkgutil.iter_modules`, since a rule nobody
-already imports would otherwise stay invisible to
-`Rule.__subclasses__()`) and asserts the two sets match.
+`cli.RULES` is explicit, but a new `Rule` subclass could previously be unit-tested and
+still never be registered in the CLI.
+
+`test_every_rule_class_is_registered_in_cli_rules` imports every rule module and checks
+that discovered subclasses match `cli.RULES`.
 
 ## A `targetRevision` can turn into a live network call
 
-Every `revision` string this tool ever shells out to `git` with comes
-from repo-controlled YAML — a source's `targetRevision`, or an
-ApplicationSet `git` generator's own `revision` — never something this
-tool chose itself. `git`'s own argument parser doesn't know that: a
-`revision` passed straight through as a positional argument is read as
-a *flag* when it starts with `-`, not as a revision. Confirmed for
-real, not theoretical, and worse than a parse error: `git archive
-"--remote=https://<host>/x"` — exactly `materialize_revision`'s own
-command — spends the full TCP connect timeout actually reaching out to
-`<host>` instead of failing instantly. A crafted `targetRevision` (a
-malicious fork's PR, a compromised dependency repo) could turn this
-into a live SSRF primitive from inside whatever CI job runs the tool —
-directly breaking the "no network access, no credentials" guarantee
-the whole tool is built on and marketed on (see "Mono-repo v1 scope"
-above).
+Revisions come from repository-controlled YAML. A value beginning with `-` is parsed by
+Git as an option. This was reproduced with:
 
-`git_context._is_safe_revision` rejects any `revision` starting with
-`-` before it ever reaches a `git` subprocess call — a real git
-revision (branch, tag, SHA) never starts with `-` in the first place
-(`git check-ref-format` itself disallows it for refs, and a hex SHA
-can't either), so this is a pure safety net, never a legitimate value
-lost. Applied at the top of every function in `git_context.py` that
-shells out with a `revision` (`is_revision_resolvable`,
-`_resolve_commit`, `materialize_revision`, `list_tree_paths`) rather
-than at a single call site: `materialize_revision` in particular has
-only two callers today, both already gated by
-`revision_matches_checkout`, but a function whose failure mode is "makes
-a network call" should be safe on its own terms, not rely on every
-future caller getting the gating right. A rejected revision is treated
-exactly like any other unresolvable one (`False`/`None`/`[]`, the same
-value each function already returns for a shallow-clone-missing
-revision) — no new severity, no new finding shape, just one more path
-into the existing `unverifiable` handling.
-`test_flag_like_revision_is_rejected_without_ever_calling_git` proves
-the guard, not just the parsing: it spies on `subprocess.run` and
-asserts zero calls, rather than trusting a mocked git's exit code.
+```text
+--remote=https://<host>/x
+```
+
+Passed to `git archive`, it caused a real outbound connection attempt and created an
+SSRF path from the CI job.
+
+`git_context._is_safe_revision` rejects `-`-prefixed revisions before any Git
+subprocess. `test_flag_like_revision_is_rejected_without_ever_calling_git` verifies
+that `subprocess.run` is never reached.
 
 ## A Kustomize overlay can read outside the repo
 
-Found while auditing the same class of bug as the `targetRevision`
-issue above, same session: `coverage._resolved_source_root` joined a
-source's own `path` onto `base_root` (`(base_root / source.path)
-.resolve()`) with no check that the result stayed inside `base_root`.
-Confirmed for real, not theoretical: a source with `path:
-../outside-secret` made `covered_files_for_application` crash
-(`Path.relative_to` raises on a path outside `base_root`) and made
-`covered_documents_for_application` — which has no such call — silently
-read and return a `Secret`'s full content from a sibling directory
-entirely outside the git repo. Unlike the `targetRevision` case, this
-one isn't network-shaped, it's a straight local file disclosure: the
-five rules reading `covered_documents_for_application`
-(`missing-ignore-diff`, `hpa-selfheal-conflict`, `unknown-sync-option`,
-`unknown-resource-hook`, `malformed-sync-wave`) would happily surface
-content from anywhere reachable via `../` from the repo root into a
-finding message.
+A source path such as `../outside-secret` could escape `base_root`.
+`covered_documents_for_application` could then read YAML from outside the checkout.
 
-A second, independent instance of the exact same bug lives one level
-deeper: `coverage._resolve_local_reference` (a Kustomize overlay's own
-`resources`/`bases`/`components`/`crds`/`patches*`/generator entries)
-joined `directory / entry` the same unguarded way — except here `entry`
-comes from *tracked YAML content* a `kustomization.yaml` file, not from
-ArgoCD's own schema, so this one doesn't even need a crafted
-`Application`: any commit that can edit a `kustomization.yaml` (a much
-lower bar — a PR touching manifests, not the Application definition
-itself) can reach it, and the recursion means a nested overlay chain
-could walk arbitrarily far outside the repo.
-
-Both fixed the same way: `base_root` (the repo root, or a materialized
-`targetRevision` snapshot) is threaded through
-`covered_files_for_source` → `covered_files_for_kustomize_dir` →
-`_resolve_local_reference`'s whole recursive call chain, and every
-resolved path is checked against it (`Path.is_relative_to`) *before*
-it's ever stat'd, walked, or read — not filtered out of the result
-afterward, which would still mean touching arbitrary filesystem
-locations along the way (a directory listing, at minimum) even if the
-content were later discarded. `base_root` defaults to the function's
-own starting directory when not given, so every existing direct/test
-caller keeps working unchanged — the default is already the correct,
-most restrictive boundary for a call with no wider context.
-`test_kustomize_resources_entry_within_base_root_still_resolves`
-guards the fix itself: a legitimate `../` reference stated inside the
-repo (an overlay referencing a shared base a few levels up — a common,
-real Kustomize pattern) must keep resolving.
+Kustomize references had the same issue one level deeper. The fix threads `base_root`
+through the resolution chain and checks every resolved path with
+`Path.is_relative_to` before stat, traversal or read. Legitimate `../` references that
+remain inside the repository still work.
 
 ## `match_glob`'s regex translation was a ReDoS
 
-Found in the same pre-v1 security audit as the two issues above:
-`globs.py`'s `match_glob` (shared by the ApplicationSet `git`
-generator's `directories`/`files` `path:` and `project-scope-violation`'s
-`sourceRepos`/`destinations`) translated a glob pattern into a regex —
-`re.match("^" + ".*".join(escaped) + "$", candidate)`, each `escaped`
-segment itself containing one `[^/]*` per `*` in that segment. Confirmed
-for real, not theoretical: a pattern shaped like `*a*a*a...*a!` (~40
-repetitions) against a non-matching candidate of `a`s hung indefinitely
-— never returned, had to be killed. A classic ReDoS: Python's `re` is a
-backtracking engine, and a chain of ambiguous wildcard/literal pairs on
-a string that ultimately doesn't match forces it to try exponentially
-many ways of distributing characters among the wildcards before giving
-up. Both the pattern *and* the candidate are repo-controlled here (an
-ApplicationSet generator's own YAML, or an `AppProject`'s own YAML), so
-this isn't a hypothetical adversary — either side of the match is a
-plausible injection point.
+The old glob matcher translated patterns into a backtracking regex. A pattern shaped
+like `*a*a*a...*a!` with roughly 40 repetitions against a non-matching string of `a`s
+hung indefinitely.
 
-Fixed by matching without a regex at all: `match_glob` now tokenizes
-the pattern once (`literal`/`*`/`**`/`?`) and runs a dynamic-programming
-scan over `candidate` — the same "is this string reachable" shape as
-`fsutil.is_within_budget`'s memoized recursion for the YAML alias bomb,
-applied here to reachability over string positions instead of over
-YAML nodes. `O(len(pattern) x len(candidate))` by construction,
-regardless of how many wildcards the pattern has — a bound that holds
-structurally, not one that relies on guessing a safe input-size limit
-(the previous approach's only real alternative, and a much weaker
-guarantee: still exponential below the limit, just a smaller limit).
-`test_a_pattern_that_previously_caused_catastrophic_backtracking_is_fast`
-runs the exact hanging input from the repro and asserts it completes in
-under a second.
+`match_glob` now tokenizes literals, `*`, `**` and `?` and uses dynamic programming,
+giving `O(len(pattern) x len(candidate))` behavior. The regression test uses the
+original hanging input.
 
 ## The follow-up audit: three more, on request
 
-The user explicitly asked for a second, more thorough pass after the
-three fixes above ("tu en vois d'autres ? ... refais un audit complet,
-je veux en être sûr"), rather than accepting a quick "looks fine."
-Checked systematically by category (every `subprocess.run` call, every
-YAML loader's constructor safety, every reporter's output escaping, the
-tar extraction path, the one other multiplicative-cost generator) —
-three more real, confirmed issues came out of it:
+A second security pass found three additional issues.
 
-**`materialize_revision` crashed on a hostile tar stream instead of
-returning `None`.** `filter="data"` (PEP 706 tar-slip hardening) does
-correctly *reject* a `../`-style entry — confirmed for real, a crafted
-entry raises `OutsideDestinationError` rather than extracting outside
-`tmp_root` — but that rejection is itself an exception, and nothing
-here caught it. An unhandled exception here would crash the whole CLI
-run instead of leaving one revision `unverifiable`, the same
-availability concern as any other "crash on hostile input" case this
-tool otherwise treats as a clean, typed finding. Now wrapped in `try:
-... except tarfile.TarError: pass`, same effect as the existing
-"subprocess failed" branch just above it: `snapshot_root` stays `None`.
+**Hostile tar streams.** PEP 706 `filter="data"` correctly rejects `../` archive
+entries, but the resulting `tarfile.TarError` was not caught. Rejection now leaves the
+revision unverifiable instead of crashing the CLI.
 
-**The table reporter interpreted repo-controlled content as rich
-markup.** `rich.table.Table.add_row` parses every string argument as
-markup by default — confirmed for real: an Application's own
-`metadata.name` containing `[link=https://evil.example]click[/link]`
-rendered as an actual clickable hyperlink in the terminal, and a
-`[bold red on white]`-style tag actually re-styled the row. `location`
-(built from a filename) and `message` (a rule's own text, sometimes
-quoting something from the manifest) are exactly as reachable — a
-crafted repo could restyle or spoof this tool's *own* terminal output,
-including faking a clickable link a reviewer might trust because it
-came from the linter's own report. Fixed with `rich.markup.escape()`
-on every field except the severity cell, which is built entirely from
-this tool's own closed `Severity` enum and style map, never repo
-content.
+**Rich markup injection.** Repo-controlled table fields were interpreted as Rich
+markup. A crafted Application name such as `[link=https://evil.example]click[/link]`
+rendered as a clickable link. Repo-controlled cells are now escaped with
+`rich.markup.escape()`. The severity cell remains unescaped because it is built only from
+the tool's closed `Severity` enum and internal style map, never repository content.
 
-**The ApplicationSet `matrix` generator's cartesian product had no
-size cap.** The existing "max 2 children" cap is about *structural*
-correctness (matching real ArgoCD behavior, see "ApplicationSet
-generators" above) — it says nothing about how large those two
-children's own param lists can be, and a `list` generator's `elements:`
-is free-form repo-controlled YAML with no per-entry size floor.
-Confirmed for real: two `list` generators of 5,000 small elements each
-— individually well under `fsutil`'s alias-bomb node budget, since
-that budget catches a densely *aliased* document, not a large but flat
-one — produced 25,000,000 combinations in ~7s for the combine step
-alone, scaling quadratically, before a single generated `Application`
-is even built or run through a rule. `_MAX_MATRIX_COMBINATIONS =
-10_000` (chosen the same way as `fsutil._MAX_EXPANDED_NODES`: generous
-headroom over any real matrix use — environments x regions rarely
-reaches even the low hundreds — far below where the cost starts to
-matter) is checked by multiplying the already-resolved child sizes,
-before the cartesian product is ever built; over the cap produces an
-`unresolvable-generator` finding instead.
+**Unbounded matrix expansion.** Two `list` generators with 5,000 elements each produced
+25,000,000 combinations in about 7 seconds. `_MAX_MATRIX_COMBINATIONS = 10_000` is now
+checked before building the Cartesian product.
 
-Checked and confirmed **not** vulnerable, so no change needed:
-`ruamel.yaml`'s `typ="rt"`/`typ="safe"` loaders (used for every
-manifest and for `.argocd-lint.yaml` respectively) don't wire up
-Python-object construction from YAML tags at all — confirmed by
-actually feeding both a `!!python/object/apply:os.system [...]`
-payload; `typ="safe"` raises, `typ="rt"` silently ignores the tag and
-returns plain data, neither executes anything. The JUnit reporter
-builds XML through `xml.etree.ElementTree`, which escapes attribute/text
-content automatically — confirmed with a message containing `<`, `&`,
-`"`. The SARIF/JSON/GitLab reporters all go through `json.dumps`, never
-manual string concatenation. `pip-audit` against the exact resolved
-dependency versions found nothing (a point-in-time check, not a
-standing guarantee — worth re-running before any future release, not
-just once here).
+The same audit confirmed safe YAML tag handling, automatic XML escaping, JSON reporter
+escaping, and no dependency issue from `pip-audit` at that point in time.
 
-**Not a code fix, a documented limitation:** `.argocd-lint.yaml` and
-`.argocd-lint-baseline.yaml` are themselves repo content. A PR from an
-untrusted fork can edit either one in the same PR that introduces the
-issue it would otherwise be flagged for — downgrade a rule's severity,
-or add a baseline entry suppressing it. This is inherent to any
-in-repo policy/baseline mechanism (the same class of thing as a
-`# noqa` comment or a `.eslintrc` change in any other linter), not
-something a code change here can close; a team running this against
-untrusted forks' PRs should protect both files with `CODEOWNERS`/branch
-protection, the same way they'd protect CI configuration itself.
+`.argocd-lint.yaml` and `.argocd-lint-baseline.yaml` remain repository-controlled
+policy files. Repositories evaluating untrusted forks should protect them with
+`CODEOWNERS`/branch protection.
 
 ## `Finding.line`
 
-Populating it requires knowing where in the YAML a given field actually
-sits, which `ruamel.yaml`'s "safe" loader throws away — so `fsutil.py`
-parses in round-trip mode (`typ="rt"`) instead. The returned
-`CommentedMap`/`CommentedSeq` still behave as plain `dict`/`list` for
-every existing `.get()`/iteration call site; only `loader.py` reaches for
-their `.lc` (line/column) attribute to fill `Source.line`,
-`Source.helm_value_files_lines` and `Application.self_heal_line`.
+`ruamel.yaml` round-trip mode preserves `.lc` metadata used for source and field
+locations. Findings point to the most useful block: source mapping, matching
+`valueFiles` entry, or `selfHeal: true`.
 
-The granularity is deliberately "point at the right block", not "point
-at the exact character": a finding about a source points at that
-source's mapping (where `repoURL:` sits), a `broken-values-ref` finding
-points at the specific `valueFiles` entry, `missing-ignore-diff` points
-at the `selfHeal: true` key (the field that enables the risk, since
-there's no existing `ignoreDifferences` entry to point at — it's about
-an absence). `orphan-source`'s main finding is the one deliberate
-exception: it stays `None`, because the whole file is the problem, not
-one line of it — SARIF correctly renders that as "no region" rather than
-a misleading line 1.
+`orphan-source` deliberately has no line because the whole file is the finding.
 
 ## ApplicationSet generators
 
-`applicationset.py` expands each `ApplicationSet` into the `Application`s
-its generators would produce, then feeds them into `loader.build_application`
-— from that point on a generated `Application` is indistinguishable from
-a plain one, so every existing rule applies to it with zero special-casing.
-That reuse is the whole point: it's what lets `phantom-target` (or any
-other rule) catch a real bug in a generated Application for free.
+ApplicationSets are expanded into ordinary `Application` objects and run through the
+same rules.
 
-Supported, because they're resolvable from a local Git checkout alone
-(no live cluster/API call, consistent with the tool's core constraint):
+Supported locally:
 
-- `list` — elements are already inline in the YAML.
-- `git.directories`/`git.files` — read the **local working tree**
-  directly, not `git show <revision>`. Correct whenever `revision`
-  matches what's checked out (`HEAD`, the overwhelming majority of
-  real-world usage); a deliberate v1 simplification, not a silent
-  approximation, kept for simplicity over the marginal case of a generator
-  pinned to some other revision.
-- `matrix` — the cartesian product of its child generators' params
-  (later keys override earlier ones on collision), as long as every
-  child is itself resolvable. Capped at exactly 2 child generators,
-  matching ArgoCD's own real limit (confirmed against the official
-  docs): the upstream controller "reports an error on generation" for a
-  3rd, it doesn't just combine unpredictably. More than 2 is flagged
-  `unresolvable-generator` instead of computing a cartesian product
-  ArgoCD itself would never actually produce — an earlier version of
-  this tool had no such cap, which would have silently reported
-  Applications that don't exist.
-- `merge` — the base (first child) generator's entries, kept even
-  without a match in a later generator; a later generator only
-  overrides fields on an entry whose `mergeKeys` already match one from
-  the base, and its own non-matching entries are discarded, per the
-  upstream semantics (confirmed against the official docs, not
-  assumed). An unresolvable *base* means no keys to match against at
-  all, so the whole `merge` produces nothing (same reasoning as
-  `matrix`'s empty cross product); an unresolvable *later* generator
-  just contributes no override — the base entries are fully known
-  regardless, so they aren't hidden behind the one finding that already
-  flags the gap. A `merge` with no `mergeKeys` is flagged
-  `unresolvable-generator` outright: the upstream docs don't specify
-  matching behavior without one, so this tool doesn't guess at it.
+- `list`;
+- `git.directories` and `git.files`;
+- `matrix`, limited to two children and 10,000 combinations;
+- `merge`, using `mergeKeys` to overlay matching base entries.
 
-Not supported, each producing one `unresolvable-generator` finding
-(`info` by default) instead of guessing: `clusters`, `scmProvider`,
-`pullRequest`, `plugin` (all require a live API/cluster call — the tool
-has none), and `goTemplate: true` (a different templating engine, Go
-templates, not the classic `{{key}}` substitution implemented here). A
-`git` generator whose `repoURL` doesn't match the repo being analyzed
-is equally out of scope, same principle as an external `Application`
-source.
+A `merge` without `mergeKeys` is `unresolvable-generator`. If the base generator is
+unresolvable, there are no known keys to merge and the result cannot be resolved; if a later
+child is unresolvable, the known base entries remain valid and only that child's overrides are
+missing. Generators needing external state (`clusters`, `scmProvider`, `pullRequest`, `plugin`,
+external Git repositories, `goTemplate: true`) are also reported as
+`unresolvable-generator`. Generator-level `selector` filtering is not approximated.
 
-A generator's own `selector` (a label filter on its generated params,
-sibling of `list`/`git`/`matrix` in the same generator entry — including
-each child generator nested inside a `matrix`) is equally flagged
-`unresolvable-generator` rather than expanded as if it weren't there:
-evaluating a label match against the generated params without guessing
-would need the exact same semantics ArgoCD itself applies, which this
-tool doesn't reimplement. Silently ignoring it would risk generating
-Applications ArgoCD would actually filter out — the same
-never-silently-skip principle as every other out-of-scope generator
-here.
-
-`Finding.line` is always `None` for a generated Application: the
-template is consumed once per generator output with different params,
-so no single YAML line is "the" location of a specific generated app —
-the best a reader can do is look at the ApplicationSet's own `template:`
-block, which `Finding.file` already points at.
+Generated Applications have `Finding.line = None`; `Finding.file` points to the
+ApplicationSet.
 
 ## `double-coverage`
 
-The mirror image of `orphan-source`: instead of "no Application covers
-this file", it's "more than one Application covers this file at once".
-Both rules (plus `missing-ignore-diff`) share the same per-Application
-coverage computation (`coverage.covered_files_for_application`) — they
-just group the result differently: `orphan-source` merges every
-Application's coverage into one set and flags what's outside it,
-`double-coverage` keeps the coverage per-Application and flags a file
-whose owner set has more than one entry.
-
-Deliberately scoped to *different* Applications: two sources of the
-*same* Application both reaching the same file is one sync loop, not two
-fighting each other, so it isn't flagged — the risk this rule targets
-(ArgoCD applying the same manifest from two independent reconciliation
-loops, flapping between whichever ran last) simply doesn't exist in that
-case.
+`double-coverage` reports a file owned by more than one different Application. Two
+sources inside the same Application are not flagged because they still belong to one
+reconciliation loop.
 
 ## `targetRevision` drift
 
-`orphan-source`, `missing-ignore-diff` and `double-coverage` all need to
-read a local source's actual files — and until this was addressed, they
-always read them off the working tree, never off `source.targetRevision`
-itself. That's invisible on the overwhelmingly common case (an
-Application's `targetRevision` is the branch actually checked out), but
-wrong whenever it isn't — e.g. a stable production Application
-deliberately pinned to an old tag while an unrelated refactor moves on
-past it on `main`. A manifest that still exists (and is still a real
-risk) at that tag, but has since been moved/deleted on `main`, would
-never be read at all: not a false alarm, a missed one — exactly the
-category of silent failure this tool exists to catch, happening inside
-the tool itself.
+Coverage rules must inspect the source at its declared `targetRevision`. Otherwise an
+Application pinned to an older tag could contain manifests no longer present on `main`
+and the linter would miss them.
 
-The fix (`coverage._resolved_source_root`): for each local source,
-`git_context.revision_matches_checkout` compares `targetRevision` against
-what's actually checked out. When it differs, `git_context.materialize_revision`
-extracts a full snapshot of the repo *as it existed at that revision*
-(`git archive <revision>`, piped straight into a throwaway directory via
-Python's `tarfile` — no shell `tar` dependency) and every existing
-filesystem-based helper (`covered_files_for_source`,
-`covered_files_for_kustomize_dir`, opaque-chart detection, ...) runs
-against that snapshot completely unchanged, instead of a parallel
-git-object-reading implementation that would have to be kept in sync
-with it by hand. The snapshot is a full extraction, not just the
-source's own `path`, deliberately: a Kustomize `resources:` entry
-reaching outside that `path` (a shared base one level up, say) must
-still resolve, exactly as it would against the real working tree.
-Extracted once per distinct revision and reused across every caller
-pinned to it within the run (see below); cleaned up at process exit.
+When the revision differs from the checkout, `materialize_revision` extracts a full
+`git archive` snapshot. Full extraction is necessary because Kustomize references may
+reach outside the source's own `path`.
 
-Two different things came out of one underlying computation, because two
-different rules need two different things from it:
+`covered_files_for_application` returns repo-relative identities; content-reading rules
+use `covered_documents_for_application` so they read from the correct working tree or
+snapshot.
 
-- `covered_files_for_application` — the repo-relative *identity* of each
-  covered file (a plain `Path`, not tied to which root — real or
-  snapshot — it was actually found under). `orphan-source` and
-  `double-coverage` only ever compare/report identities, never read file
-  content, so this is all they need.
-- `covered_documents_for_application` — the parsed YAML *content* of
-  each covered file, read from wherever it actually lives (the snapshot
-  for a divergent source). `missing-ignore-diff` is the one rule that
-  inspects file content (looking for an at-risk CRD kind), so it uses
-  this instead — reading the "as-if-repo_root" identity above would try
-  to open a file that may not even exist there anymore.
+Missing revisions remain `unverifiable`. `revision_mismatch` separately reports a
+source pinned away from the checkout as `info`.
 
-A revision that isn't resolvable at all (a shallow clone missing the
-branch) is left entirely to `phantom-target`/`broken-values-ref`'s
-existing `unverifiable` handling (`is_revision_resolvable`) rather than
-guessed at here — `revision_matches_checkout` returns `None` for that
-case specifically so callers can tell "differs" apart from "unknown."
-
-`rules/revision_mismatch.py` reports the divergence itself, once per
-affected source, purely as an FYI (`info` by default, configurable) —
-not a correctness caveat, since the rules above already resolved it
-correctly: it's there so a human reading the report notices that an
-Application is pinned away from HEAD at all, which is easy to miss
-otherwise.
-
-The ApplicationSet `git` generator's own `revision` (`directories`/
-`files`, independent of any generated Application's `targetRevision` —
-confirmed against the upstream Git generator docs) had the exact same
-gap until it was pointed out in review: `applicationset._resolve_git`
-read the checked-out working tree unconditionally, `revision` never
-even read. Invisible on the common case (`revision: HEAD`), but a
-`revision` pinned elsewhere would silently discover today's directory
-structure instead of the pinned one's — a *worse* failure mode than
-the other `unresolvable-generator` cases, since nothing was flagged at
-all. Fixed by reusing `git_context.materialize_revision` here too, the
-one gotcha being that `revision_matches_checkout`'s three-way return
-must be handled as three branches, not two: `is False` for "differs, go
-resolve a snapshot" cannot also stand in for "doesn't resolve at all"
-(`None`) — `None is False` is `False` in Python, so a naive `if ... is
-False` skips straight past an unresolvable revision and silently
-treats it as matching HEAD. `None` is checked first and reported
-`unverifiable`, same severity `phantom-target`/`broken-values-ref`
-already use for exactly this shallow-clone case.
+ApplicationSet Git generators use the same snapshot mechanism. The three-state result
+of `revision_matches_checkout` must preserve "unknown" separately from "different" so
+an unfetched revision is not mistaken for HEAD. In particular, `None is False` evaluates
+to `False` in Python, so a naive `if result is False` branch does not catch the unknown
+case and can silently fall through as if the revision matched the checkout.
 
 ## `project-scope-violation`
 
-An Application's `spec.project` restricts which repos it may sync from
-and which destinations it may sync to (`AppProject.spec.sourceRepos`/
-`destinations`). Outside that scope, ArgoCD refuses to sync — but
-nothing in the repo itself looks wrong, so from a Git-only point of view
-it's silent, exactly the failure mode this tool exists for. It's also
-fully static: pure string/glob matching between manifests already in
-the repo (the Application and its own `AppProject`), no cluster access
-needed.
+This rule compares an Application with its `AppProject` using repository data only.
 
-The matching semantics are deliberately *not* a single shared helper
-applied uniformly — because ArgoCD itself doesn't use one. Read directly
-from ArgoCD's own source
-(`AppProject.IsSourcePermitted`/`isDestinationMatched` in
-`app_project_types.go`) rather than assumed, since guessing here nearly
-produced two confidently wrong results during development:
+ArgoCD applies different matching semantics:
 
-- `sourceRepos`: a bare `*` always matches unconditionally — a special
-  case in ArgoCD's own `globMatch` wrapper that bypasses the glob engine
-  entirely, not something a general-purpose glob library would do on its
-  own. Any other pattern is a `/`-segment-bounded glob (`*` within one
-  segment, `**` crosses — the same semantics as the `git` ApplicationSet
-  generator's `directories`/`files`, see above), matched against both
-  the pattern and the Application's `repoURL` normalized the same way
-  `git_context.normalize_repo_url` already does elsewhere in this tool
-  (ArgoCD normalizes both sides too, via its own `git.NormalizeGitURL`),
-  so a harmless ssh-vs-https or trailing-`.git` difference isn't a false
-  violation.
-- `destinations` (`server`/`name`/`namespace`): an *unbounded* glob —
-  ArgoCD calls the same underlying matcher without any separator
-  argument here, so `*` crosses `/` freely, unlike `sourceRepos`.
-  Deliberately not `fnmatch.fnmatch` (case-insensitive on Windows) but
-  `fnmatchcase`: a namespace/server/cluster name is case-sensitive data,
-  not a filesystem path, and matching should be identical however the
-  tool is run.
-- `destination.name` vs `destination.server`: resolving one against the
-  other requires knowing which live cluster a nickname (`name`) actually
-  points to — cluster/API access this tool doesn't have. When the
-  Application and its `AppProject` destinations don't share a
-  comparable field (app uses `server`, every project entry only has
-  `name`, or vice versa), that's flagged `info` rather than guessed at
-  either way — matching everything or matching nothing would both be a
-  coin flip.
-- A negated (`!`-prefixed) `sourceRepos`/`destinations` entry is flagged
-  `info` instead of evaluated: ArgoCD's own negation logic (a deny match
-  short-circuits, but a deny *non*-match counts toward the positive
-  total too) is confusing enough that the community has open bug reports
-  about its surprises — not something to reimplement with confidence.
+- `sourceRepos`: bare `*` matches everything; other patterns use segment-aware matching
+  after repository URL normalization;
+- destinations use unbounded, case-sensitive glob matching;
+- `destination.name` cannot be safely compared with `destination.server` without live
+  cluster data, so mismatched forms produce `info`;
+- negated project entries are reported as `info` instead of reimplementing ArgoCD's
+  non-trivial negation behavior.
 
-A `project:` not found anywhere in the repo is either ArgoCD's own
-auto-created, permissive `"default"` (silently assumed, since flagging
-it would be noise on the overwhelming majority of repos that never
-declare it explicitly) or a named project genuinely managed elsewhere —
-flagged `info` in the second case, never silently treated as "no
-restriction" the way a missing `"default"` is.
+Missing `"default"` is treated as ArgoCD's permissive built-in project. A missing named
+project is reported as `info`.
 
 ## `hpa-selfheal-conflict`
 
-A `HorizontalPodAutoscaler` and `selfHeal: true` both trying to own the
-same `Deployment`/`StatefulSet`'s `spec.replicas` is one of the most
-commonly reported ArgoCD footguns: the HPA scales the workload, ArgoCD's
-next self-heal reconciliation sees a live value that no longer matches
-Git and reverts it, the HPA scales it back — a permanent fight, fully
-silent from the Application's health/sync status (both stay green).
+An HPA and ArgoCD self-heal can fight over `spec.replicas`. `ignoreDifferences` alone
+is not enough: `RespectIgnoreDifferences=true` is also required during sync.
 
-The non-obvious part, confirmed against ArgoCD's own
-[diffing](https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/)/
-[sync-options](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/)
-docs rather than assumed: `ignoreDifferences` alone does **not** fix
-this. It only affects the *diff* used to compute `OutOfSync` — during an
-actual sync, the desired manifest is still applied as-is, replicas
-included, unless the `RespectIgnoreDifferences=true` sync option is also
-set. A repo with `ignoreDifferences` for the Deployment but missing that
-sync option looks correctly configured to a human reviewer and is still
-broken — which is exactly why this rule checks for *both*, and reports a
-distinct message when only one is present, rather than a single
-generic "misconfigured" finding.
-
-The HPA's target is resolved from its own `scaleTargetRef`
-(`kind`/`name`, and `apiVersion` when present to derive the Kubernetes
-API group for matching against `ignoreDifferences.group`) — never by
-searching for a matching Deployment manifest in the repo. This keeps the
-rule correct even when the target is rendered by a Helm chart this tool
-doesn't template, and avoids a false negative when the target simply
-isn't declared as a plain file at all. When `scaleTargetRef.apiVersion`
-is absent, the group is looked up in a small built-in map (`Deployment`/
-`StatefulSet`/`ReplicaSet` → `apps`, `ReplicationController` → core) —
-an unrecognized `kind` outside that map (e.g. a custom scalable CRD like
-Argo Rollouts' `Rollout`) is silently skipped rather than guessed at.
+The rule resolves the target from `scaleTargetRef`, so Helm-rendered workloads remain
+detectable. A small kind-to-group map handles common workloads when `apiVersion` is
+missing; unknown custom scalable resources are skipped.
 
 ## `sync-validation-disabled`
 
-`Validate=false` in `syncOptions` skips the Kubernetes API server's
-schema validation on every sync. It's a legitimate escape hatch for a
-CRD whose OpenAPI schema is itself broken upstream, but it's also a
-common way to make a validation error on a genuinely wrong manifest go
-away without fixing the manifest — and, once added, easy to forget
-about since nothing about the Application's health/sync status hints
-that validation is off. `info` by default (not `warning`/`error`): the
-flag is explicit in the manifest, not hidden the way this tool's other
-findings are, so it's a nudge to double-check, not a presumed mistake.
+`Validate=false` disables Kubernetes API schema validation during sync. It can be
+intentional, but it can also hide an invalid manifest.
+
+The rule is `info` by default because the option is explicit.
 
 ## `duplicate-application-name`
 
-ArgoCD keys an `Application` by `(namespace, name)` — its own internal
-identity, the same as any other Kubernetes object. Two manifests
-declaring the same pair don't show anything wrong when read on their
-own; the collision only surfaces once both are applied, and even then
-as one silently overwriting or fighting the other rather than a clear
-error (confirmed against several real reports, not assumed —
-[argoproj/argo-cd#9420](https://github.com/argoproj/argo-cd/issues/9420),
-[#23808](https://github.com/argoproj/argo-cd/issues/23808), which notes
-an `ApplicationSet`-generated duplicate "replaces previous instance
-without warning"). Exactly the class of bug this tool exists for.
+ArgoCD identifies an Application by `(namespace, name)`. Two manifests using the same
+pair can overwrite or fight each other.
 
-The check runs against the `applications` list a rule receives as-is —
-by the time rules run, that list already merges plain manifests with
-every `ApplicationSet`-generated `Application` (see `cli.py`), so a
-collision is caught the same way regardless of which side of the
-collision is templated. Two generated entries colliding with each other
-(the same `ApplicationSet`'s own generator rendering the same name
-twice, e.g. a typo'd `elements` list) share the same `source_file` — the
-`ApplicationSet`'s own manifest, per `Finding.line`'s existing note
-above — so it's de-duplicated to one mention rather than listed twice.
-
-`namespace` defaults to `"argocd"` when omitted (same as ArgoCD itself,
-consistent with `project-scope-violation`'s own default handling) — in
-practice almost every real repo puts every Application in the same
-namespace, so this mostly reduces to "duplicate name", full stop; the
-namespace is tracked mainly for the rare "Applications in any namespace"
-setup, not because same-name-different-namespace collisions are known
-to be common.
+The rule runs after plain and ApplicationSet-generated Applications are combined.
+Namespace defaults to `"argocd"` when omitted.
 
 ## `malformed-ignore-diff-pointer`
 
 `ignoreDifferences[].jsonPointers` follows
-[RFC 6901](https://www.rfc-editor.org/rfc/rfc6901): every pointer must
-start with `/`, one segment per `/`. A pointer written as `spec.replicas`
-or `spec/replicas` (missing the leading slash) resolves to nothing, so
-the rule silently ignores nothing — the field it was meant to protect
-still shows up in every diff, and still gets reverted on every
-`selfHeal` reconciliation exactly as if `ignoreDifferences` had never
-been written. A genuinely common mistake, not a hypothetical one: dot
-notation copied from a different tool's path syntax (JSONPath, Lua) is
-the most frequent variant reported.
+[RFC 6901](https://www.rfc-editor.org/rfc/rfc6901): pointers must begin with `/`.
+Values such as `spec.replicas` therefore do not match the intended field.
 
-Deliberately not a heuristic: RFC 6901 makes "does this start with `/`"
-an objective yes/no, unlike e.g. `missing-ignore-diff`'s pattern
-matching. `jqPathExpressions` (the other `ignoreDifferences` matcher)
-isn't checked the same *full* way — validating actual `jq` syntax would
-need a real `jq` parser (a `libjq` binding), a dependency for uncertain
-payoff, and most of the community-reported `jqPathExpressions`
-*behavior* problems turn out to be ArgoCD-side quirks that vary by
-version rather than authoring mistakes a static check could catch
-reliably. The one narrow, purely syntactic slice that's just as
-objective as this rule's own check does get one — see
-`malformed-ignore-diff-jq-expression` below.
+The rule checks only this objective syntax requirement.
 
 ## `malformed-ignore-diff-jq-expression`
 
-The sibling check to `malformed-ignore-diff-pointer` above, deliberately
-scoped just as narrowly: a `jqPathExpressions` entry that doesn't start
-with `.` — every real example in ArgoCD's own diffing-customization docs
-does (`.spec.template.spec.initContainers[] | select(...)`,
-`.webhooks[]?.clientConfig.caBundle`), the same way every `jsonPointers`
-entry starts with `/`. The mistake this catches is concrete and easy to
-make given how these two fields sit right next to each other in the
-same YAML block: pasting a `jsonPointers`-style path (`/spec/replicas`)
-into `jqPathExpressions` instead. `/spec/replicas` isn't valid jq — it
-fails to parse.
+A common mistake is to paste a JSON-pointer-style value such as `/spec/replicas` into
+`jqPathExpressions`; valid jq expressions begin with `.`.
 
-This isn't a reversal of the "no real `jq` parser" call above (see
-`argocd-source-lint-plan-technique.md`'s `v0.1.16` note, which excluded
-`jqPathExpressions` from validation for the same reason repeated there):
-that decision was about not chasing ArgoCD's own version-dependent
-*evaluation* quirks (label selectors not filtering as expected, arrays
-being dropped, etc. — real reported behavior, but not something a
-static syntax check should try to predict). Checking for a leading `.`
-needs no `jq` engine at all, catches an authoring mistake, not an
-ArgoCD bug, and is exactly as objective as the RFC 6901 check right
-above it.
-
-The blast radius is actually *wider* than a bad `jsonPointers` entry,
-confirmed directly against ArgoCD's own source
-(`util/argo/normalizers/diff_normalizer.go`'s `NewIgnoreNormalizer`,
-which compiles every `jqPathExpressions` entry via `gojq.Parse`/
-`gojq.Compile`, wrapped as `del(<expression>)`): a parse failure
-returns an error immediately, aborting construction of the normalizer
-for the *entire* `ignoreDifferences` list, not just the one malformed
-entry — every other rule in the same list, `jsonPointers` included,
-stops being honored too. This matches real community reports of
-`jqPathExpressions` that "apply without errors but don't actually do
-anything" — silent, exactly the failure category this tool exists for,
-and worse here than the isolated failure of a single bad pointer.
+The rule checks that narrow syntax property without trying to reproduce jq evaluation.
+ArgoCD's `NewIgnoreNormalizer` aborts construction of the entire
+`ignoreDifferences` normalizer on a parse failure, so one malformed expression can
+invalidate otherwise valid entries.
 
 ## `unknown-sync-option`
 
-`spec.syncPolicy.syncOptions` entries are matched by ArgoCD as literal
-`Key=Value` strings — there's no schema validation on the key or the
-value, so a wrong case (`respectIgnoreDifferences=true` instead of
-`RespectIgnoreDifferences=true`) or a misspelled key
-(`PruneLatest=true`) is never rejected. It's just never recognized
-either, so the option has zero effect: exactly the same silent-no-op
-shape `hpa-selfheal-conflict` already relies on for
-`RespectIgnoreDifferences` specifically, generalized to the entire
-option set.
+ArgoCD reads `syncOptions` as literal `Key=Value` strings. A misspelled or incorrectly
+cased key is simply ignored.
 
-The [official sync-options docs](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/)
-document a closed, exact list of 13 keys (confirmed there, not assumed):
-`Prune`, `Validate`, `SkipDryRunOnMissingResource`, `Delete`,
-`ApplyOutOfSyncOnly`, `PrunePropagationPolicy`, `PruneLast`, `Replace`,
-`ServerSideApply`, `ClientSideApplyMigration`, `FailOnSharedResource`,
-`RespectIgnoreDifferences`, `CreateNamespace` — all PascalCase. Only the
-**key** portion (before `=`) is checked against that set, deliberately
-not the value: the exact accepted values/casing per key (`=true` only?
-`=false` too? `=confirm`? `PrunePropagationPolicy`'s three enum values)
-aren't consistently documented across every key, so validating values
-too would risk a false positive on a legitimate but less-common
-combination — the same "don't guess" principle as
-`malformed-ignore-diff-pointer` restricting itself to the one
-unambiguous RFC 6901 rule (a leading `/`) rather than every possible
-way a pointer could be semantically wrong.
+The Application-level key set comes from the official sync-options documentation.
+Only keys are validated because accepted values are not documented consistently enough
+to avoid false positives.
 
-The per-resource `argocd.argoproj.io/sync-options` annotation is a
-related but genuinely distinct, smaller key set (confirmed against the
-same docs) — `Force` only exists here, while `ApplyOutOfSyncOnly`/
-`RespectIgnoreDifferences`/`CreateNamespace`/`FailOnSharedResource`/
-`ClientSideApplyMigration`/`PrunePropagationPolicy` are
-Application-level-only concepts that don't apply to a single resource.
-This rule checks both: the Application-level list directly, and the
-per-resource annotation by scanning every covered document the same
-way `missing-ignore-diff`/`hpa-selfheal-conflict` already do — a key
-that's valid at one level but not the other (e.g.
-`RespectIgnoreDifferences=true` on a single resource) is still flagged,
-since it's just as much a no-op there.
+Per-resource `argocd.argoproj.io/sync-options` annotations use their own supported key
+set.
 
 ## `unknown-resource-hook`
 
-`argocd.argoproj.io/hook` and `argocd.argoproj.io/hook-delete-policy`
-are read by the controller as plain annotation strings — like
-`sync-options`/`sync-wave`, there's no schema enforcing their value
-against a closed set. A misspelled value (`presync`, `HookSuceeded`)
-most likely falls through silently: the resource is just treated as a
-normal, non-hook resource, or as a hook with no delete policy at all,
-applied and left in place with everything else rather than erroring.
+`argocd.argoproj.io/hook` and `argocd.argoproj.io/hook-delete-policy` are unvalidated
+annotation strings, so misspellings can silently fall through.
 
-Both annotations accept a comma-separated list, same convention as
-`sync-options`. The valid values (confirmed against the official
-sync-waves docs, not assumed) are `PreSync`/`Sync`/`Skip`/`PostSync`/
-`SyncFail`/`PreDelete`/`PostDelete` for `hook`, and `HookSucceeded`/
-`HookFailed`/`BeforeHookCreation` for `hook-delete-policy`.
+Accepted hook values are `PreSync`, `Sync`, `Skip`, `PostSync`, `SyncFail`,
+`PreDelete` and `PostDelete`; delete policies are `HookSucceeded`, `HookFailed` and
+`BeforeHookCreation`.
 
-Slightly lower confidence than `unknown-sync-option`, worth calling out
-explicitly rather than glossing over: the sync-options docs state in so
-many words that an unrecognized option has no effect, but the
-sync-waves docs merely *list* the valid hook values without spelling
-out what happens to an invalid one. The silent-fallthrough behavior
-here is inferred from the same architecture (annotations are unvalidated
-strings, consistently confirmed for every other case checked this way),
-not quoted directly — hence `unknown-resource-hook` staying ranked
-behind `unknown-sync-option` when this was prioritized.
+This rule was treated with lower confidence during prioritization because ArgoCD documents the
+accepted values clearly, but the exact runtime behavior of an unknown hook value is less explicit
+than the behavior of an unknown sync option.
 
 ## `malformed-sync-wave`
 
-`argocd.argoproj.io/sync-wave` is parsed by ArgoCD's own `GetSyncWave`
-function using Go's `strconv.Atoi` (confirmed directly against the
-argo-cd source, since the docs themselves don't spell out the
-error-handling behavior) — a signed integer literal, nothing else. A
-value that fails to parse (a stray word, a decimal point, a value
-copy-pasted from a different annotation like `PreSync`) doesn't error:
-`Atoi`'s error return falls through to the same wave-0 default used
-when the annotation is absent entirely, exactly the unvalidated-string
-architecture already confirmed for `sync-options`/`hook`. The
-consequence is quieter than most of this tool's other findings — a
-resource just syncs in the default wave instead of the one intended,
-not obviously wrong unless you're specifically checking ordering — but
-the check itself is fully objective (does this parse as an integer?),
-not a guess.
+ArgoCD parses `argocd.argoproj.io/sync-wave` with Go's `strconv.Atoi`. Invalid values
+fall back to wave `0`.
+
+The rule therefore checks whether the annotation is a valid signed integer.
 
 ## `broken-values-ref`'s plain `valueFiles` check
 
-Found by tracing a real, confirmed community report
-([argoproj/argo-cd#4558](https://github.com/argoproj/argo-cd/issues/4558),
-"New Applications with misconfiguration show up as Healthy") back to a
-gap in this tool rather than a new rule: a plain (non-`$ref`)
-`helm.valueFiles` entry — the common case, not the exception — was
-never checked for existence at all. Only cross-source `$ref/path.yaml`
-entries were. A missing values file fails Helm template generation on
-ArgoCD's side, and the Application can converge to a misleadingly
-healthy status instead of a clear sync error — exactly the failure
-class this tool exists for, previously invisible for the *more* common
-addressing scheme.
+`broken-values-ref` checks both cross-source `$ref/path.yaml` entries and plain Helm
+`valueFiles`.
 
-A plain entry resolves relative to its own source's `path` (the chart
-root for a `path:`-based source), checked with the same revision-aware
-`git ls-tree` machinery already used for `$ref` entries — no new
-mechanism, same `RULE_ID`, following the precedent set by
-`unknown-sync-option` covering both the Application-level and
-per-resource forms of the same underlying concern rather than
-splitting into two rule IDs. Two deliberate exclusions, both to avoid
-a false positive on a legitimately unverifiable or intentionally
-tolerant case: a source with no local `path` (nothing to resolve a
-relative entry against — a pure Helm registry/OCI chart) is skipped,
-and `helm.ignoreMissingValueFiles: true` disables the check entirely
-for that source, since ArgoCD itself then silently tolerates a missing
-file by design (confirmed against the official docs) — nothing left to
-flag.
+Plain entries resolve relative to the source chart path and use the same revision-aware
+Git tree checks. `helm.ignoreMissingValueFiles: true` disables the check for that
+source, matching ArgoCD behavior.
 
 ## Extension points
 
-- `loader.ApplicationDiscovery` is an interface, not tied to raw YAML —
-  `RawManifestDiscovery` is the only implementation in v1, but a
-  `HelmRenderedDiscovery` (for Applications generated by a Helm chart
-  rather than declared as plain YAML) could implement the same interface
-  without touching the rules or reporters.
-- `rules/known-operators.yaml` is a data-driven pack for
-  `missing-ignore-diff`: adding an operator signature is a YAML change,
-  never a code change (see `CONTRIBUTING.md`). Most operators derive a
-  single resource name from a single scalar field (`metadata.name`,
-  `spec.secretName`) — `name_from_each` is the escape hatch for the
-  minority that don't: Zalando's `postgresql` CRD generates one Secret
-  *per entry* of `spec.users` (`{username}.{clustername}.credentials.postgresql.acid.zalan.do`,
-  confirmed against the operator's own docs), so `name_from_each:
-  spec.users` iterates that mapping's keys as `{user}`, alongside the
-  usual `{name}` from `name_from`. MariaDB Operator's root/user
-  passwords were considered too, and dropped: their Secret name is a
-  free-form field the user themselves sets on the CR
-  (`rootPasswordSecretKeyRef.name`), not something the operator derives
-  from `metadata.name` — nothing here to encode as a signature without
-  guessing at a name that doesn't actually follow a fixed convention.
-- A Flux adapter (`Kustomization`/`HelmRelease`, with its own broken-ref
-  pattern via `valuesFrom`/`postBuild.substituteFrom`) is a natural
-  candidate once the ArgoCD-specific v1 has stabilized.
+- `loader.ApplicationDiscovery` allows a future rendered discovery implementation to
+  feed the existing rule/reporting pipeline.
+- `rules/known-operators.yaml` keeps `missing-ignore-diff` signatures data-driven;
+  `name_from_each` covers one-resource-per-entry operators.
+- Explicitly configured resource names are not encoded as derived-name signatures.
+- Flux `Kustomization`/`HelmRelease` support is a natural future adapter.
