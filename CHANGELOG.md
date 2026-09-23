@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.2] - 2026-09-23
+
+### Changed
+
+- Rewrote README, DESIGN, CONTRIBUTING and SECURITY for tone and length. No
+  functional change. Published so the condensed README is what PyPI/TestPyPI
+  actually display — an already-published version's description can't be
+  edited in place, only a new version's can.
+
 ## [1.0.1] - 2026-09-22
 
 ### Fixed
