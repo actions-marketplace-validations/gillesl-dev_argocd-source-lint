@@ -232,6 +232,12 @@ unverifiable_blocks_ci: true
 exclude_paths:
   - manifests/legacy/**
 
+# Narrows unknown-sync-option/unknown-resource-hook to what this exact
+# ArgoCD version actually recognizes. Omitted by default, which keeps both
+# rules accepting every value ArgoCD has ever recognized, regardless of
+# version.
+argocd_version: "3.2.0"
+
 # Additional operator signatures.
 # These are added to the built-in signatures for:
 # CNPG, cert-manager, Elastic ECK, RabbitMQ, Strimzi,
@@ -246,6 +252,14 @@ known_operators:
 ```
 
 Custom `known_operators` entries extend the built-in operator list. They don't replace it.
+
+`argocd_version` only affects `unknown-sync-option` and `unknown-resource-hook`. Some
+recognized values are newer than others -- for example, `Prune`/`Delete` only became valid
+Application-level `syncOptions` keys in ArgoCD 3.4.0, and the `PreDelete` hook only exists
+since 3.3.0. Declaring your real ArgoCD version catches the case where a value is spelled
+correctly but isn't available yet on your cluster, where it's just as silent a no-op as a
+typo. Every version in the tool's data was traced to the ArgoCD commit that introduced it,
+not estimated -- see [DESIGN.md](./DESIGN.md) for the sourcing method.
 
 ## Using it on an existing repository
 
@@ -292,7 +306,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: gillesl-dev/argocd-source-lint@v1.0.2
+      - uses: gillesl-dev/argocd-source-lint@v1.1.1
         with:
           path: .
 ```
@@ -311,7 +325,7 @@ Then include the component using a tag, branch, or commit SHA:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v1.0.2
+  - component: $CI_SERVER_FQDN/<your-gitlab-group>/argocd-source-lint/lint@v1.1.1
     inputs:
       scope: manifests/
 ```
@@ -323,7 +337,7 @@ You don't have to publish the component in the GitLab CI/CD Catalog. A normal `i
 ```yaml
 repos:
   - repo: https://github.com/gillesl-dev/argocd-source-lint
-    rev: v1.0.2
+    rev: v1.1.1
     hooks:
       - id: argocd-source-lint
 ```
