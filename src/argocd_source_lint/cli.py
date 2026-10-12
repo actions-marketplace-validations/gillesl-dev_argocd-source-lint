@@ -28,6 +28,7 @@ from argocd_source_lint.rules.base import Rule
 from argocd_source_lint.rules.broken_values_ref import BrokenValuesRefRule
 from argocd_source_lint.rules.double_coverage import DoubleCoverageRule
 from argocd_source_lint.rules.duplicate_application_name import DuplicateApplicationNameRule
+from argocd_source_lint.rules.floating_target_revision import FloatingTargetRevisionRule
 from argocd_source_lint.rules.hpa_selfheal_conflict import HpaSelfHealConflictRule
 from argocd_source_lint.rules.malformed_ignore_diff_jq_expression import (
     MalformedIgnoreDiffJqExpressionRule,
@@ -65,6 +66,7 @@ RULES: list[Rule] = [
     UnknownSyncOptionRule(),
     UnknownResourceHookRule(),
     MalformedSyncWaveRule(),
+    FloatingTargetRevisionRule(),
 ]
 
 

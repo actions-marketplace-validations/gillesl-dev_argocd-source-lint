@@ -25,6 +25,7 @@ DEFAULT_RULE_SEVERITIES: dict[str, Severity] = {
     "unknown-sync-option": Severity.WARNING,
     "unknown-resource-hook": Severity.WARNING,
     "malformed-sync-wave": Severity.WARNING,
+    "floating-target-revision": Severity.WARNING,
 }
 
 

@@ -22,6 +22,7 @@ rules:
   unknown-sync-option: warning
   unknown-resource-hook: warning
   malformed-sync-wave: warning
+  floating-target-revision: warning
 
 # Default: true (fail-closed). Only set to false knowingly if the team
 # accepts running on an incomplete shallow clone in CI.
@@ -33,7 +34,7 @@ exclude_paths:
 # Narrows unknown-sync-option/unknown-resource-hook to what this exact
 # ArgoCD version actually recognizes. Omit it (the default) and both rules
 # keep accepting every value ArgoCD has ever recognized, regardless of
-# version -- e.g. `Prune`/`Delete` as Application-level syncOptions keys
-# only work from ArgoCD 3.4.0 onward; declaring an older version here
+# version. For example, `Prune`/`Delete` as Application-level syncOptions
+# keys only work from ArgoCD 3.4.0 onward; declaring an older version here
 # catches that real silent no-op.
 # argocd_version: "3.2.0"
