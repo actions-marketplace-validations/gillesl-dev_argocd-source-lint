@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-10-12
+
+### Added
+
+- Added `floating-target-revision` for a `targetRevision` written as a version range
+  (`1.2.*`, `>=1.2.0 <1.3.0`, `*`) instead of an exact pin. Confirmed against the
+  official ArgoCD docs: a range is resolved against the highest matching chart version
+  or Git tag at every sync, so the deployed content can change with no corresponding
+  commit in this repository. Applies to both Helm chart sources and plain Git sources,
+  and never flags a branch name or `HEAD`.
+
 ## [1.1.1] - 2026-10-08
 
 ### Fixed
@@ -17,14 +28,14 @@ All notable changes to this project are documented in this file, following
 - Added the optional `argocd_version` setting, narrowing `unknown-sync-option` and
   `unknown-resource-hook` to the sync options/hooks actually available on that ArgoCD
   version instead of every value ArgoCD has ever recognized. Every introduction version
-  was traced to the real `argoproj/argo-cd` commit that shipped it, not estimated — see
+  was traced to the real `argoproj/argo-cd` commit that shipped it, not estimated. See
   DESIGN.md. Omitting the setting keeps the previous, version-blind behavior.
 
 ### Fixed
 
 - `Prune`/`Delete` were treated as always-valid Application-level `syncOptions` keys.
   They only became valid there in ArgoCD 3.4.0 (confirmed against the introducing code
-  commit, not just docs) — before that, only the per-resource annotation form worked.
+  commit, not just docs). Before that, only the per-resource annotation form worked.
   Declaring an older `argocd_version` now catches this as a real silent no-op.
 - An invalid `.argocd-lint.yaml` (e.g. a malformed `argocd_version`) now exits with a
   clear, field-by-field message and exit code 2 instead of a raw Python traceback.
@@ -35,7 +46,7 @@ All notable changes to this project are documented in this file, following
 
 - Rewrote README, DESIGN, CONTRIBUTING and SECURITY for tone and length. No
   functional change. Published so the condensed README is what PyPI/TestPyPI
-  actually display — an already-published version's description can't be
+  actually display. An already-published version's description can't be
   edited in place, only a new version's can.
 
 ## [1.0.1] - 2026-09-22
