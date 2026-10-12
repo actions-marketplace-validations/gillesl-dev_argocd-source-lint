@@ -185,6 +185,22 @@ through the resolution chain and checks every resolved path with
 `Path.is_relative_to` before stat, traversal or read. Legitimate `../` references that
 remain inside the repository still work.
 
+## Kustomize vs Helm visibility
+
+Kustomize overlays are not rendered, but a resource they compose is still a real,
+committed YAML file sitting in the repository. Content-based rules such as
+`missing-ignore-diff` and `hpa-selfheal-conflict` read every file under an
+Application's covered directory directly, so a Kustomize-managed resource is visible
+to them the same way any other file is. `orphan-source` additionally follows
+`kustomization.yaml`'s own `resources`/`bases`/`components`/`crds`/`patches`/generator
+references, so a file reached only through one of those, for example a shared base
+kept outside the directly scanned subtree, is not reported as an orphan either.
+
+A Helm chart is different. A resource a chart template produces at `helm template`
+time does not exist as a file in the repository at all, so there is nothing for any
+rule to read. This is the real gap behind the `HelmRenderedDiscovery` extension point
+below, and it should not be confused with the Kustomize case.
+
 ## `match_glob`'s regex translation was a ReDoS
 
 The old glob matcher translated patterns into a backtracking regex. A pattern shaped
@@ -369,14 +385,14 @@ Both rules above originally treated their closed sets as always valid, regardles
 which ArgoCD version a user's cluster actually runs. That's wrong in one concrete,
 verified direction: a value can be correctly spelled and still be a silent no-op simply
 because it's newer than the user's ArgoCD. `Prune`/`Delete` as Application-level
-`syncOptions` keys are the clearest case -- they only work from ArgoCD 3.4.0 onward; on
+`syncOptions` keys are the clearest case: they only work from ArgoCD 3.4.0 onward; on
 any older version ArgoCD silently ignores them there (they only existed as the
 per-resource annotation before that).
 
 `.argocd-lint.yaml`'s optional `argocd_version` setting addresses this: when declared,
 `argocd_versions.is_known` narrows each table to the subset actually available as of
 that version. Left unset, both rules keep accepting every value ArgoCD has ever
-recognized -- the original, version-blind behavior, unchanged.
+recognized: the original, version-blind behavior, unchanged.
 
 **Sourcing method, exactly, because this is the kind of claim this project refuses to
 estimate:** a full clone of `argoproj/argo-cd`, then for each of the 24 values `git log
@@ -389,23 +405,23 @@ first introduced that exact string, then `git tag --contains <commit>` filtered 
 pickaxe search was unusable for short keys (`Prune` is a substring of
 `PrunePropagationPolicy`); `--pickaxe-regex` with a `\b`-bounded pattern fixed that.
 `git tag --contains --merged origin/master` returned nothing useful because this repo's
-tag history is dominated by release-branch cherry-picks, not a linear path to master —
-plain `git tag --contains` (no `--merged`) is what actually works here.
+tag history is dominated by release-branch cherry-picks, not a linear path to master.
+Plain `git tag --contains` (no `--merged`) is what actually works here.
 
 Two values needed the commit itself inspected, not just the docs: `Prune` and `Delete`
 were valid as the per-resource annotation since 1.1.0/2.7.0, but the Application-level
 form is a distinct, later code change (`argoproj/argo-cd#23370`,
-"feat: add Prune and Delete as application level sync option", first in `v3.4.0`) --
+"feat: add Prune and Delete as application level sync option", first in `v3.4.0`),
 confirmed by reading the diff, not inferred from the docs commit alone.
 `ClientSideApplyMigration` is a rename, not a new feature: the capability shipped in
 `v3.1.0` as `DisableClientSideApplyMigration=true`, renamed to its current spelling in
 `v3.3.0`. `CreateNamespace`'s code shipped in `v1.7.0` but wasn't documented in
-`sync-options.md` until `v2.5.0` -- the table uses the real (earlier) code date, not the
+`sync-options.md` until `v2.5.0`. The table uses the real (earlier) code date, not the
 docs date, in that one case; `Replace`'s per-resource form has the same kind of lag and
 is handled the same way.
 
 This table is accurate as of the research date (2026-10-08) and is a manual snapshot,
-not something CI re-verifies against upstream on every run -- the same caveat that
+not something CI re-verifies against upstream on every run. The same caveat
 already applies to the rest of this tool's closed vocabularies (see `unknown-sync-option`
 above).
 
@@ -424,6 +440,34 @@ The rule checks whether the annotation is a valid signed integer.
 Plain entries resolve relative to the source chart path and use the same revision-aware
 Git tree checks. `helm.ignoreMissingValueFiles: true` disables the check for that
 source, matching ArgoCD behavior.
+
+## `floating-target-revision`
+
+ArgoCD reads a `targetRevision` written with range syntax (`1.2.*`, `>=1.2.0 <1.3.0`,
+`*`) as a semver constraint, confirmed against the official Tracking and Deployment
+Strategies docs. It resolves that constraint against the highest matching chart
+version or Git tag at every sync, never against branches. The same Application can
+then deploy different content tomorrow with no corresponding commit in this
+repository, which defeats the point of keeping desired state in Git.
+
+The rule flags any `targetRevision` containing `* ^ ~ < > =`. A real tag, branch, or
+commit SHA can never contain any of those characters (`git check-ref-format` forbids
+`*`, `~`, `^`, and whitespace outright), so their presence reliably means constraint
+syntax rather than a plain ref name. This keeps the check an objective string test
+instead of trying to parse semver constraints, and it never flags a mono-repo
+Application tracking its own branch or `HEAD`.
+
+## `missing-ignore-diff`'s operator signatures
+
+A `known-operators.yaml` entry is a warning telling the user to add an
+`ignoreDifferences` rule for one exact Secret name. If `name_pattern` is wrong, two
+things happen at the same time: the user adds a rule that covers nothing, and the
+real derived Secret stays exposed to a self-heal conflict. A wrong signature gives
+more confidence than it earns, and that is worse than having no signature at all.
+
+This is why a signature is only added once the operator's own documentation states
+the derived name directly. An example, a changelog mention, or a plausible-looking
+pattern is not enough on its own.
 
 ## Extension points
 

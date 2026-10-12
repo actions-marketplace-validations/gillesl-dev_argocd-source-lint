@@ -47,6 +47,7 @@ It catches cases that are easy to miss because ArgoCD may still report an Applic
 | `unknown-sync-option` | warning | An unknown or incorrectly cased ArgoCD sync option |
 | `unknown-resource-hook` | warning | An unknown ArgoCD hook or hook deletion policy value |
 | `malformed-sync-wave` | warning | A sync-wave annotation whose value isn't a valid integer |
+| `floating-target-revision` | warning | A `targetRevision` written as a version range instead of an exact pin |
 
 ### A few examples
 
@@ -62,33 +63,62 @@ Sync options are case-sensitive. Something that looks close enough can still be 
 
 For sync waves, the annotation value has to be an integer. An invalid value falls back to wave `0`.
 
-Sample run using the default table output:
+`floating-target-revision` catches a `targetRevision` such as `1.2.*` or `>=1.2.0 <1.3.0`. ArgoCD resolves that kind of range against the highest matching chart version or Git tag at every sync, so the deployed content can change with no corresponding commit in this repository.
+
+Sample run using the default table output, captured from a real repo with a phantom
+target, an orphan file, a file covered by two Applications, and a CNPG cluster
+missing its `ignoreDifferences`:
 
 ```text
-$ argocd-source-lint .
+$ argocd-source-lint /home/user/gitops-repo
 
-Rule                 Severity  File                                 Application       Message
-────────────────────────────────────────────────────────────────────────────────────────────────
-phantom-target       error     apps/payments/application.yaml       payments-service  targetRevision "release-3.2"
-                                                                                     does not resolve to any
-                                                                                     local ref
-orphan-source        error     manifests/legacy/old-ingress.yaml    -                 not covered by any
-                                                                                     declared source
-double-coverage      error     manifests/shared/configmap.yaml      -                 covered by both "team-a"
-                                                                                     and "team-b"
-missing-ignore-diff  warning   apps/postgres/application.yaml       postgres-cluster  selfHeal: true with no
-                                                                                     ignoreDifferences on a
-                                                                                     CNPG Cluster
+4 ArgoCD Application(s) discovered under /home/user/gitops-repo
 
-4 findings (3 error, 1 warning, 0 info) — exit code 1
+┌──────────┬─────────────────────┬──────────────────┬────────────────────────────────┬─────────────────────────────────┐
+│ Severity │ Rule                │ Application      │ File                            │ Message                         │
+├──────────┼─────────────────────┼──────────────────┼────────────────────────────────┼─────────────────────────────────┤
+│ error    │ orphan-source       │ -                │ manifests/legacy/old-ingress.… │ File not covered by any         │
+│          │                     │                  │                                │ Application source:             │
+│          │                     │                  │                                │ manifests/legacy/old-ingress.y… │
+│ error    │ phantom-target      │ payments-service │ bootstrap/argocd-apps/payment… │ path `apps/does-not-exist` not  │
+│          │                     │                  │                                │ found at revision `HEAD` —      │
+│          │                     │                  │                                │ phantom target.                 │
+│ warning  │ missing-ignore-diff │ postgres-cluster │ bootstrap/argocd-apps/postgre… │ selfHeal active and             │
+│          │                     │                  │                                │ `postgresql.cnpg.io/Cluster`    │
+│          │                     │                  │                                │ `postgres-cluster` detected,    │
+│          │                     │                  │                                │ but no `ignoreDifferences`      │
+│          │                     │                  │                                │ covers `Secret`                 │
+│          │                     │                  │                                │ `postgres-cluster-app` — ArgoCD │
+│          │                     │                  │                                │ risks resetting this            │
+│          │                     │                  │                                │ out-of-Git-managed field on     │
+│          │                     │                  │                                │ every sync.                     │
+│ warning  │ missing-ignore-diff │ postgres-cluster │ bootstrap/argocd-apps/postgre… │ selfHeal active and             │
+│          │                     │                  │                                │ `postgresql.cnpg.io/Cluster`    │
+│          │                     │                  │                                │ `postgres-cluster` detected,    │
+│          │                     │                  │                                │ but no `ignoreDifferences`      │
+│          │                     │                  │                                │ covers `Secret`                 │
+│          │                     │                  │                                │ `postgres-cluster-ca` — ArgoCD  │
+│          │                     │                  │                                │ risks resetting this            │
+│          │                     │                  │                                │ out-of-Git-managed field on     │
+│          │                     │                  │                                │ every sync.                     │
+│ error    │ double-coverage     │ -                │ manifests/shared/configmap.ya… │ File covered by 2 different     │
+│          │                     │                  │                                │ Applications: team-a, team-b —  │
+│          │                     │                  │                                │ ArgoCD would sync it from       │
+│          │                     │                  │                                │ independent loops, risking it   │
+│          │                     │                  │                                │ flapping between whichever      │
+│          │                     │                  │                                │ Application last applied it.    │
+└──────────┴─────────────────────┴──────────────────┴────────────────────────────────┴─────────────────────────────────┘
 ```
+
+Three errors and two warnings here, so the process exits with code 1 (see
+[Exit codes](#exit-codes) below).
 
 ## How it works
 
 ```mermaid
 flowchart LR
     A["Git repo checkout"] --> B["Discovery<br/>Applications + ApplicationSets"]
-    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>malformed-ignore-diff-jq-expression, unknown-sync-option,<br/>unknown-resource-hook, malformed-sync-wave"]
+    B --> C["Rules<br/>orphan-source, broken-values-ref,<br/>missing-ignore-diff, phantom-target,<br/>unresolvable-generator, double-coverage,<br/>revision-mismatch, project-scope-violation,<br/>hpa-selfheal-conflict, sync-validation-disabled,<br/>duplicate-application-name, malformed-ignore-diff-pointer,<br/>malformed-ignore-diff-jq-expression, unknown-sync-option,<br/>unknown-resource-hook, malformed-sync-wave,<br/>floating-target-revision"]
     C --> D{"Policy<br/>severity overrides + baseline"}
     D --> E["Reporters<br/>table, json, sarif, gitlab-codequality, junit"]
 ```
@@ -121,6 +151,17 @@ This keeps referenced files in an overlay from being reported as orphans.
 Remote Kustomize resources are skipped because they cannot be verified from the local checkout.
 
 See [DESIGN.md](./DESIGN.md) for more details.
+
+### Helm
+
+Helm charts are not rendered either. A resource a chart template produces only exists
+after `helm template` runs, so it is never a file in the repository and no rule can
+see it.
+
+This is a different situation from Kustomize above. A Kustomize-managed resource is
+still a real, committed file that the content-based rules (`missing-ignore-diff`,
+`hpa-selfheal-conflict`, and others) read directly, even though the overlay itself
+isn't applied.
 
 ### ApplicationSet
 
@@ -226,6 +267,7 @@ rules:
   unknown-sync-option: warning
   unknown-resource-hook: warning
   malformed-sync-wave: warning
+  floating-target-revision: warning
 
 unverifiable_blocks_ci: true
 
@@ -254,12 +296,12 @@ known_operators:
 Custom `known_operators` entries extend the built-in operator list. They don't replace it.
 
 `argocd_version` only affects `unknown-sync-option` and `unknown-resource-hook`. Some
-recognized values are newer than others -- for example, `Prune`/`Delete` only became valid
+recognized values are newer than others. For example, `Prune`/`Delete` only became valid
 Application-level `syncOptions` keys in ArgoCD 3.4.0, and the `PreDelete` hook only exists
 since 3.3.0. Declaring your real ArgoCD version catches the case where a value is spelled
 correctly but isn't available yet on your cluster, where it's just as silent a no-op as a
 typo. Every version in the tool's data was traced to the ArgoCD commit that introduced it,
-not estimated -- see [DESIGN.md](./DESIGN.md) for the sourcing method.
+not estimated. See [DESIGN.md](./DESIGN.md) for the sourcing method.
 
 ## Using it on an existing repository
 
