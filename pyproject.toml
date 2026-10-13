@@ -1,6 +1,6 @@
 [project]
 name = "argocd-source-lint"
-version = "1.1.1"
+version = "1.2.0"
 description = "Static linter to detect silent failures in multi-source ArgoCD Applications"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,17 +48,17 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# Gitignored internal working doc, never published — not project source.
+# Gitignored internal working doc, never published. Not project source.
 extend-exclude = ["argocd-source-lint-plan-technique.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 # UP042: `str, Enum` (not `StrEnum`) is deliberate for pydantic v2 JSON
-# serialization of Severity/OutputFormat — a stylistic suggestion, not a bug.
+# serialization of Severity/OutputFormat. A stylistic suggestion, not a bug.
 ignore = ["UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 # B008: typer's CLI parameters are defined by calling typer.Argument()/
-# typer.Option() as the parameter default — that's the framework's API,
+# typer.Option() as the parameter default. That's the framework's API,
 # not a mutable-default bug.
 "src/argocd_source_lint/cli.py" = ["B008"]

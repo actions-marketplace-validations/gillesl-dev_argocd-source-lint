@@ -63,6 +63,11 @@ _RULES_METADATA = {
         "An argocd.argoproj.io/sync-wave annotation value isn't a valid integer -- "
         "silently falls back to wave 0 instead of erroring."
     ),
+    "floating-target-revision": (
+        "A targetRevision is a version range instead of an exact pin. ArgoCD resolves "
+        "it against the highest matching chart version or Git tag at every sync, so "
+        "the deployed content can change with no corresponding commit."
+    ),
 }
 
 _LEVEL_BY_SEVERITY = {
