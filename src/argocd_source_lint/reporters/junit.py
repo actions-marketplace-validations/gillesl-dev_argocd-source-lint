@@ -3,14 +3,11 @@ from __future__ import annotations
 from xml.etree import ElementTree as ET
 
 from argocd_source_lint.models import Finding, Severity
+from argocd_source_lint.reporters.safe_text import visible_controls
 
-# JUnit has no native "warning"/"info" level, only pass/failure/error/
-# skipped. error and unverifiable are the two severities that actually
-# block CI by default (see cli._exit_code); mapped to <failure>.
-# warning/info become <skipped> rather than a plain, silent pass: they
-# ARE something to look at, just not blocking, and a skipped testcase
-# renders visually distinct (grey, not green) in every consumer that
-# matters here (Jenkins, GitLab, Azure DevOps).
+# JUnit has no warning or info level. The severities that fail CI by default
+# (cli._exit_code) become <failure>. The others become <skipped>, which
+# Jenkins, GitLab and Azure DevOps show apart from a pass.
 _FAILING = {Severity.ERROR, Severity.UNVERIFIABLE}
 
 
@@ -38,20 +35,18 @@ def render_findings(findings: list[Finding]) -> str:
 
 
 def _testcase(finding: Finding, seen: dict[tuple[str, str], int]) -> ET.Element:
-    # GitLab's own JUnit parser silently drops every testcase after the
-    # first one sharing the same name, and `name` here is the finding's
-    # message, which two *different* findings (different file/Application)
-    # can share verbatim (e.g. the same copy-pasted typo in two repos'
-    # worth of manifests). A suffix on the repeat keeps every finding
-    # visible instead of one silently vanishing from the report.
+    # GitLab's JUnit parser drops testcases whose name repeats an earlier
+    # one, and two findings in different files can share a message.
     key = (finding.rule_id, finding.message)
     seen[key] = seen.get(key, 0) + 1
-    name = finding.message if seen[key] == 1 else f"{finding.message} (#{seen[key]})"
+    # XML 1.0 rejects most control characters, which repo content can carry.
+    message = visible_controls(finding.message)
+    name = message if seen[key] == 1 else f"{message} (#{seen[key]})"
 
     attrs = {
-        "classname": finding.rule_id,
+        "classname": visible_controls(finding.rule_id),
         "name": name,
-        "file": finding.file.as_posix(),
+        "file": visible_controls(finding.file.as_posix()),
         "time": "0",
     }
     if finding.line is not None:
@@ -59,9 +54,7 @@ def _testcase(finding: Finding, seen: dict[tuple[str, str], int]) -> ET.Element:
 
     testcase = ET.Element("testcase", attrs)
     if finding.severity in _FAILING:
-        ET.SubElement(
-            testcase, "failure", {"message": finding.message, "type": finding.severity.value}
-        )
+        ET.SubElement(testcase, "failure", {"message": message, "type": finding.severity.value})
     else:
         ET.SubElement(testcase, "skipped", {"message": f"{finding.severity.value}: not blocking"})
     return testcase

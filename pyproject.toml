@@ -1,7 +1,7 @@
 [project]
 name = "argocd-source-lint"
-version = "1.2.0"
-description = "Static linter to detect silent failures in multi-source ArgoCD Applications"
+version = "1.4.1"
+description = "Lints ArgoCD Applications for mistakes ArgoCD doesn't report, from the Git checkout alone"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["argocd", "gitops", "kubernetes", "lint", "static-analysis"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
@@ -33,7 +33,7 @@ Issues = "https://github.com/gillesl-dev/argocd-source-lint/issues"
 argocd-source-lint = "argocd_source_lint.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
 
 [build-system]
 requires = ["hatchling"]

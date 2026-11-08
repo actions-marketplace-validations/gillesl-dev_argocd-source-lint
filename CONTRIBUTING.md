@@ -1,7 +1,16 @@
 # Contributing to argocd-source-lint
 
-See [DESIGN.md](./DESIGN.md) for the reasoning behind the mono-repo v1 scope and other
+See [DESIGN.md](./DESIGN.md) for the reasoning behind the single-repository scope and other
 non-obvious implementation decisions.
+
+Coding agents also read [CLAUDE.md](./CLAUDE.md).
+
+## History rewrite of 2026-10-27
+
+The commit history was rewritten once on 2026-10-27. Tags
+`v1.2.1` and `v1.2.2` now point to new commits with identical content. If you cloned before
+that date, run `git fetch --tags --force && git pull --rebase`. A plain `git pull` tries to
+merge the old commits back in and stops on a conflict. Published PyPI releases are unaffected.
 
 ## Setup
 
@@ -23,7 +32,7 @@ src/argocd_source_lint/
 ├── cli.py           # Typer entrypoint
 ├── models.py        # Application, Source, Finding, Severity...
 ├── loader.py        # Application discovery and parsing
-├── git_context.py   # Local repo detection, mono-repo classification, Git primitives
+├── git_context.py   # Local repo detection, source classification, Git primitives
 ├── fsutil.py        # YAML discovery and multi-document parsing
 ├── coverage.py      # Coverage resolution for path sources
 ├── policy.py        # Loading and merging .argocd-lint.yaml
@@ -41,8 +50,8 @@ src/argocd_source_lint/
    check(applications, repo_root, policy, local_origin) -> list[Finding]
    ```
 
-2. Use `git_context.local_path_sources` and `external_path_sources` to preserve the mono-repo v1
-   behavior.
+2. Use `git_context.local_path_sources` and `external_path_sources` to keep the
+   single-repository behavior.
 
    Check local sources normally. External sources should produce an `info` finding through
    `rules.base.external_source_finding`.
@@ -52,14 +61,18 @@ src/argocd_source_lint/
 
 3. Register the rule in `RULES` in `cli.py`.
 
+   Add its default severity to `DEFAULT_RULE_SEVERITIES` and a one-line description to
+   `RULE_DESCRIPTIONS` in `policy.py`, and a section named after the rule ID in
+   `docs/rules.md`. Tests fail until all three exist.
+
 4. Add tests:
    - use the shared `tests/fixtures/good_repo` for the compliant case;
    - add `tests/fixtures/bad_my_rule/` for the failing case;
-   - cover edge cases with unit tests.
+   - cover edge cases with unit tests;
+   - add a positive case to `tests/test_mutations.py`, and the rule's documented default severity
+     to `DOCUMENTED_SEVERITIES` there (a test fails until both exist).
 
-5. If possible, run the rule against a real GitOps repository before opening the PR. This is how
-   several early coverage gaps were found, including `directory.include`/`exclude` and
-   `$ref`/`helm.valueFiles`.
+5. If possible, run the rule against a real GitOps repository before opening the PR.
 
 ## Adding an operator to `missing-ignore-diff`
 
@@ -79,16 +92,15 @@ dotted path to that mapping. Each key becomes `{user}` alongside `{name}` in `na
 
 See the Zalando Postgres Operator entry in `known-operators.yaml` for an example.
 
-Only add a signature when the operator's own documentation confirms the derived resource name.
-Do not infer naming behavior from examples or assumptions. See [DESIGN.md](./DESIGN.md) for the
+Only add a signature when the operator's own documentation states the derived resource name.
+Do not infer naming behavior from examples. See [DESIGN.md](./DESIGN.md) for the
 reasoning behind this constraint.
 
 ## Code style
 
 - Add comments only when they explain a non-obvious reason: a hidden constraint, verified ArgoCD
   behavior, or a workaround.
-- Avoid introducing an abstraction until there is a second real use case. `coverage.py`, `fsutil.py`,
-  and the Git helpers in `git_context.py` all followed that rule.
+- Avoid introducing an abstraction until there is a second real use case.
 - Every rule must work without cluster access.
 - Ruff handles linting and formatting, with configuration in `pyproject.toml`:
 
@@ -110,3 +122,25 @@ Each rule should have:
 - a compliant case using the shared `good_repo` fixture;
 - a failing `bad_<rule>/` fixture;
 - inline tests with the `git_repo` fixture for edge cases that do not need a dedicated directory.
+
+`tests/test_release_versions.py` fails until `action.yml`, `templates/lint.yml` and the README's
+CI examples all name the version in `pyproject.toml`.
+
+`tests/test_mutations.py` runs the real CLI on a clean synthetic repository with one defect
+injected per case. When you fix a false positive, add a negative case there, with a comment
+naming the fix, rather than widening an existing case. When you fix a missed detection, add a
+new positive case for that variant.
+
+## Releasing
+
+1. Bump `version` in `pyproject.toml`, run `uv lock`, and update the same version in
+   `action.yml`, `templates/lint.yml` and the README's CI examples
+   (`tests/test_release_versions.py` fails until they all match). Date the CHANGELOG section.
+2. Build with `uv build` and check with `uvx twine check dist/*`.
+3. Publish to PyPI before pushing the tag: the Action and the GitLab component at that tag
+   install exactly that version, so a tag pushed first points at a release that doesn't exist
+   yet.
+4. Push the annotated tag, then create the GitHub Release from it. A pushed tag does not become
+   a Release by itself.
+5. Move the `v1` tag to the new release (`git tag -f v1 "vX.Y.Z^{}"` then
+   `git push -f origin v1`), so `@v1` users of the Action get it.
